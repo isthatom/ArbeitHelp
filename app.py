@@ -210,14 +210,6 @@ def _normalize_text(text):
     return re.sub(r"\s+", " ", (text or "").strip().lower())
 
 
-def _session_attempt_payload(session_id):
-    with _db() as conn:
-        return conn.execute(
-            "SELECT * FROM attempts WHERE session_id = ? ORDER BY question_index ASC, id ASC",
-            (session_id,),
-        ).fetchall()
-
-
 def _session_progress(session_id):
     with _db() as conn:
         session = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
@@ -517,7 +509,7 @@ def session_question():
     session, err = _require_session()
     if err:
         return err
-    if session["finalized"] or int(session["current_q_index"]) >= SESSION_LENGTH:
+    if session["finalized"] or int(session["current_q_index"]) >= SESSION_LENGTH: # type: ignore
         return jsonify({"error": "session complete", "completed": True, "summary": _session_summary(session["id"])}), 409
     session_state = _session_progress(session["id"])[2]
     existing = _current_attempt(session["id"], int(session["current_q_index"]))
@@ -670,36 +662,11 @@ def session_skip():
     result, err = _grade_and_store(session, "", skipped=True)
     if err:
         return err
-    if int(_load_session(session["id"])["current_q_index"]) >= SESSION_LENGTH:
+    if int(_load_session(session["id"])["current_q_index"]) >= SESSION_LENGTH: 
         _finalize_session(session["id"])
         _, _, session_state = _session_progress(session["id"])
         result["session_completed"] = session_state["session_completed"]
     return jsonify(result)
-
-
-@app.route("/session/end", methods=["POST"])
-def end_session():
-    session, err = _require_session()
-    if err:
-        return err
-    _finalize_session(session["id"])
-    return jsonify(_session_summary(session["id"]))
-
-
-@app.route("/question")
-def get_question():
-    session, err = _require_session()
-    if session:
-        return session_question()
-    return jsonify({"error": "session required"}), 400
-
-
-@app.route("/submit", methods=["POST"])
-def submit():
-    session, err = _require_session()
-    if session:
-        return session_submit()
-    return jsonify({"error": "session required"}), 400
 
 
 @app.route("/correct", methods=["POST"])
@@ -793,63 +760,6 @@ def basic_grade(answer):
     return "Rule-based grading applied. Strong answer.", 3, "strong detail"
 
 
-@app.route("/status")
-def status():
-    user_id = request.args.get("user", "anonymous")
-    with _db() as conn:
-        sessions = conn.execute("SELECT * FROM sessions WHERE user_email = ? ORDER BY started_at ASC", (user_id,)).fetchall()
-        attempts = conn.execute("SELECT * FROM attempts WHERE user_email = ? AND skipped = 0 ORDER BY created_at ASC", (user_id,)).fetchall()
-    points = [int(a["points"]) for a in attempts if a["points"] is not None]
-    by_role = {}
-    for a in attempts:
-        if a["points"] is None:
-            continue
-        by_role.setdefault(a["role"], []).append(int(a["points"]))
-    total = sum(points)
-    answered = len(points)
-    avg = total / answered if answered else 0
-    return jsonify({"score": total, "answered": answered, "average": round(avg, 2), "by_role": by_role, "sessions": len(sessions)})
-
-
-@app.route("/leaderboard")
-def leaderboard():
-    role = request.args.get("role", "").strip()
-    limit = min(int(request.args.get("limit", 10)), 50)
-    if role and role not in QUESTIONS:
-        return jsonify({"error": "Invalid role"}), 400
-    with _db() as conn:
-        rows = conn.execute("SELECT user_email, role, points FROM attempts WHERE points IS NOT NULL").fetchall()
-    scores = {}
-    for row in rows:
-        if role and row["role"] != role:
-            continue
-        scores.setdefault(row["user_email"], 0)
-        scores[row["user_email"]] += int(row["points"])
-    leaderboard_rows = [{"user": user, "score": score} for user, score in scores.items() if score > 0]
-    leaderboard_rows.sort(key=lambda x: x["score"], reverse=True)
-    return jsonify({"leaderboard": leaderboard_rows[:limit], "role": role or "all"})
-
-
-@app.route("/history")
-def history():
-    user_id, err = _check_user()
-    if err:
-        return err
-    with _db() as conn:
-        attempts = conn.execute("SELECT * FROM attempts WHERE user_email = ? ORDER BY created_at ASC", (user_id,)).fetchall()
-    return jsonify({"history": [
-        {
-            "question": a["question_text"],
-            "answer": a["answer"],
-            "points": a["points"],
-            "feedback": a["feedback"],
-            "skipped": bool(a["skipped"]),
-            "session_id": a["session_id"],
-            "role": a["role"],
-        } for a in attempts
-    ]})
-
-
 @app.route("/stats/unlock-status")
 def stats_unlock():
     user_id, err = _check_user()
@@ -928,7 +838,7 @@ def export_json():
         "sessions": [dict(row) for row in sessions],
         "attempts": [dict(row) for row in attempts],
     }
-    return Response(json.dumps(payload, indent=2), mimetype="application/json", headers={"Content-Disposition": f"attachment; filename=unjobless_history_{user_id}.json"})
+    return Response(json.dumps(payload, indent=2), mimetype="application/json", headers={"Content-Disposition": f"attachment; filename=arbiethelp_history_{user_id}.json"})
 
 
 @app.route("/stats/export/pdf")
@@ -946,14 +856,14 @@ def export_pdf():
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 18)
-    pdf.cell(0, 12, "ArbietHelp - Interview Report", ln=True, align="C")
+    pdf.cell(0, 12, "ArbietHelp - Interview Report", ln=1, align="C")
     pdf.set_font("Helvetica", "", 11)
-    pdf.cell(0, 8, f"User: {user_id}", ln=True, align="C")
-    pdf.cell(0, 8, f"Generated: {_utcnow().strftime('%Y-%m-%d %H:%M UTC')}", ln=True, align="C")
+    pdf.cell(0, 8, f"User: {user_id}", ln=1, align="C")
+    pdf.cell(0, 8, f"Generated: {_utcnow().strftime('%Y-%m-%d %H:%M UTC')}", ln=1, align="C")
     pdf.ln(6)
     for i, s in enumerate(sessions, 1):
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 8, f"Session {i} - {s['role']}", ln=True)
+        pdf.cell(0, 8, f"Session {i} - {s['role']}", ln=1)
         pdf.set_font("Helvetica", "", 10)
         for a in [x for x in attempts if x["session_id"] == s["id"]]:
             pdf.multi_cell(0, 5, f"Q: {a['question_text']}")
@@ -966,7 +876,7 @@ def export_pdf():
     buf = BytesIO()
     pdf.output(buf)
     buf.seek(0)
-    return Response(buf.getvalue(), mimetype="application/pdf", headers={"Content-Disposition": f"attachment; filename=unjobless_report_{user_id}.pdf"})
+    return Response(buf.getvalue(), mimetype="application/pdf", headers={"Content-Disposition": f"attachment; filename=arbiethelp_report_{user_id}.pdf"})
 
 
 @app.route("/health")

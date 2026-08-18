@@ -30,7 +30,7 @@ async function initAuth() {
     const existingToken = localStorage.getItem('auth_token');
     if (existingToken) return existingToken;
 
-    const anonEmail = 'anon_' + Math.random().toString(36).substr(2, 9) + '@unjobless.local';
+    const anonEmail = 'anon_' + Math.random().toString(36).substr(2, 9) + '@arbiethelp.local';
     const res = await fetch('/auth/signup', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},

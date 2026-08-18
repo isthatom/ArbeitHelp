@@ -1,8 +1,7 @@
-const TIMER_SECONDS = 90;
+const TIMER_SECONDS = 120;
 const SESSION_LENGTH_DEFAULT = 5;
 
 let role = null;
-let score = 0;
 let questionsAnswered = 0;
 let currentQuestionNumber = 1;
 let sessionLength = SESSION_LENGTH_DEFAULT;
@@ -13,7 +12,6 @@ let timerHidden = false;
 let authToken = null;
 let sessionToken = null;
 let sessionCompleted = false;
-let currentQuestionSource = '';
 let currentImproved = '';
 let currentChanges = [];
 let currentCorrectionUsesAI = false;
@@ -52,7 +50,7 @@ async function initAuth() {
     try {
         const existingToken = localStorage.getItem('auth_token');
         if (existingToken) return existingToken;
-        const anonymousEmail = 'anonymous_' + Math.random().toString(36).substr(2, 9) + '@unjobless.local';
+        const anonymousEmail = 'anonymous_' + Math.random().toString(36).substr(2, 9) + '@arbiethelp.local';
         const res = await fetch('/auth/signup', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -202,7 +200,6 @@ function applySessionState(data) {
     if (typeof data.questions_answered === 'number') questionsAnswered = data.questions_answered;
     if (typeof data.session_score === 'number') sessionScore = data.session_score;
     if (typeof data.session_completed === 'boolean') sessionCompleted = data.session_completed;
-    currentQuestionSource = data.question_source_label || data.question_source || currentQuestionSource;
     updateProgressUI();
 }
 

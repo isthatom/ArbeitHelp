@@ -117,7 +117,7 @@ async function exportJSON() {
         var blob = await r.blob();
         var a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = 'unjobless_history_' + new Date().toISOString().split('T')[0] + '.json';
+        a.download = 'arbiethelp_history_' + new Date().toISOString().split('T')[0] + '.json';
         a.click();
         URL.revokeObjectURL(a.href);
     } catch(e) { alert('Export failed'); }
@@ -136,7 +136,7 @@ function exportPDF() {
         .then(function(blob) {
             var a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
-            a.download = 'unjobless_report_' + new Date().toISOString().split('T')[0] + '.pdf';
+            a.download = 'arbiethelp_report_' + new Date().toISOString().split('T')[0] + '.pdf';
             a.click();
             URL.revokeObjectURL(a.href);
         })

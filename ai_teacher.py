@@ -37,10 +37,6 @@ def load_question_prompt() -> str:
     return "You generate one interview question at a time. Return only valid JSON."
 
 
-def _get_client():
-    return None
-
-
 def _clean_json(text: str) -> str:
     text = text.strip()
     if text.startswith("```"):
@@ -118,6 +114,7 @@ def _invoke_ai(messages, system_prompt, expected_tokens_out=900):
         "temperature": 0.2,
         "max_completion_tokens": expected_tokens_out,
         "response_format": {"type": "json_object"},
+        "reasoning_effort": "low",
     }
     req = urlrequest.Request(
         "https://api.groq.com/openai/v1/chat/completions",
@@ -211,7 +208,7 @@ def ai_generate_question(role, question_number, session_context, session_length=
         resp = _invoke_ai(
             [{"role": "user", "content": _build_question_prompt(role, question_number, session_length, session_context)}],
             load_question_prompt(),
-            expected_tokens_out=260,
+            expected_tokens_out=600,
         )
         latency_ms = int((time.time() - start) * 1000)
         text = _extract_text(resp)

@@ -1,8 +1,11 @@
 .env
 .jwt_secret
 cost_data.json
+.mypy_cache/
 __pycache__/
+.DS_Store
+server.log
+test.json
+test_final.json
 *.pyc
 app_data.sqlite3
-server.log
-.DS_Store
