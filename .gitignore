@@ -1,0 +1,8 @@
+.env
+.jwt_secret
+cost_data.json
+__pycache__/
+*.pyc
+app_data.sqlite3
+server.log
+.DS_Store

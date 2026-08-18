@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ArbietHelp - AI Interviewer</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./questions.css">
+    <script src="./questions.js" defer></script>
+</head>
+
+<body>
+
+    <div class="header">
+        <a href="index.html" class="back"><- CHANGE ROLE</a>
+                <h1 id="role-title">ArbietHelp</h1>
+                <p id="role-subtitle">// INTERVIEW MODE //</p>
+
+    </div>
+
+    <div class="box" id="question-box">
+        <div class="box-label">
+            <span>QUESTION</span>
+            <span id="difficulty-lvl"></span>
+            <span id="question-source"></span>
+            <div id="progress-track" class="progress-track">
+                <div id="progress-fill" class="progress-fill"></div>
+            </div>
+            <span id="q-counter">Q1</span>
+        </div>
+        <div id="question-display">
+            LOADING....<span class="cursor">_</span>
+        </div>
+        <div id="timer-box">
+            <span id="timer-display"> </span>
+            <div class="timer-track">
+                <div class="timer-fill" id="timer-fill"></div>
+            </div>
+            <button id="hide-timer-btn" class="hide-timer-btn" onclick="hideTimer()">HIDE TIMER</button>
+        </div>
+    </div>
+
+    <div class="box">
+        <div class="box-label">
+            <span>YOUR ANSWER</span>
+            <span id="word-count-label">
+                <span id="word-count">0</span>
+            </span>
+        </div>
+        <textarea id="user-answer" rows="7"
+            placeholder="TYPE YOUR ANSWER HERE. BE SPECIFIC BY USING EXAMPLES AND MAKE SURE TO EXPLAIN YOUR REASONING.">
+        </textarea>
+    </div>
+
+    <button id="submit-btn" onclick="submitAnswer()" aria-label="SUBMIT ANSWER"> SUBMIT YOUR ANSWER</button>
+    <button id="skip-btn" onclick="skipQuestion()">SKIP THIS QUESTION</button>
+    <button id="improve-btn" onclick="improveAnswer()" class="hidden">AI IMPROVE MY ANSWER</button>
+
+    <div id="feedback-box" class="hidden">
+        <div class="box-label">
+            <span>AI FEEDBACK</span>
+            <span id="score-display"></span>
+        </div>
+        <div id="rating-bar">
+            <span id="rating-label"></span>
+
+        </div>
+        <div id="feedback-text"></div>
+        <div id="feedback-breakdown"></div>
+        <button id="next-btn" onclick="nextQuestion()">NEXT QUESTION -></button>
+
+    </div>
+
+    <div id="correction-modal" class="hidden">
+        <div class="modal-overlay" onclick="closeCorrection()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>AI IMPROVED ANSWER</h3>
+                <button class="modal-close" onclick="closeCorrection()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="correction-explanation"></div>
+                <div id="correction-diff"></div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="closeCorrection()">CANCEL</button>
+                <button id="apply-correction" onclick="applyCorrection()">APPLY IMPROVEMENT</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <span>SCORE: <span id="score">0</span>PTS</span>
+        <span>ANSWERED: <span id="q-count"></span></span>
+        <span>ArbietHelp v1.0</span>
+    </div>
+</body>
+
+</html>

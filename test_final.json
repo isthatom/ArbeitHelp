@@ -1,0 +1,26 @@
+{
+  "points": [
+    1
+  ],
+  "by_role": {
+    "Software Engineer": [
+      1
+    ]
+  },
+  "sessions": [
+    {
+      "role": "Software Engineer",
+      "completed_at": "2026-07-28T09:48:16.364633",
+      "questions": [
+        {
+          "question": "Explain the difference between composition and inheritance.",
+          "asked_at": "2026-07-28T09:47:21.683717",
+          "answer": "Composition is a has-a relationship where a class contains instances of other classes. Inheritance is an is-a relationship where a class extends another. Composition is more flexible - you can change behavior at runtime, avoid tight coupling, and do not break encapsulation. Inheritance creates tight coupling and fragile base class problem. Example: Car has Engine (composition) vs Car is a Vehicle (inheritance).",
+          "points": 1,
+          "feedback": "okay see now you could do soo much better than this, u definitely got the potential in u  u hv missed out on many critical ideas and words you need to give an explaination for oop design, code organization. use examples bru, interviewers prefer that over yap, it shows u can apply stuff irl soo ",
+          "grader": "ai"
+        }
+      ]
+    }
+  ]
+}

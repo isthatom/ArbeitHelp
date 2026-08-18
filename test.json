@@ -1,0 +1,26 @@
+{
+  "points": [
+    1
+  ],
+  "by_role": {
+    "Software Engineer": [
+      1
+    ]
+  },
+  "sessions": [
+    {
+      "role": "Software Engineer",
+      "completed_at": "2026-07-28T09:44:53.619753",
+      "questions": [
+        {
+          "question": "What is CI/CD and why is it important?",
+          "asked_at": "2026-07-28T09:44:30.596590",
+          "answer": "CI/CD stands for Continuous Integration and Continuous Deployment. CI means automatically building and testing code on every commit. CD means automatically deploying to production. It is important because it catches bugs early, reduces manual work, enables faster releases, and improves code quality.",
+          "points": 1,
+          "feedback": "okay see now you could do soo much better than this, u definitely got the potential in u okay not tht consise, you still have to mention all the key terms and important things, make sure to include examples.  u hv missed out on many critical ideas and words you need to give an explaination for development velocity. use examples bru, interviewers prefer that over yap, it shows u can apply stuff irl soo ",
+          "grader": "ai"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>ArbeitHelp - Progress Charts</title>
+        <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323:wght@400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+        <link rel="stylesheet" href="./stats.css">
+    </head>
+    <body>
+        <div id="lock-screen" class="lock-screen hidden">
+            <h2>PROGRESS LOCKED</h2>
+            <p>Answer <span id="lock-required-count">1</span> questions to unlock stats</p>
+            <p>You've answered: <span id="lock-answered">0</span> / <span id="lock-required-total">1</span></p>
+            <a id="lock-start-btn" href="questions.html?role=Software%20Engineer">START PRACTICING -></a>
+        </div>
+
+        <div id="stats-content" class="hidden">
+            <header class="stats-header">
+                <a href="index.html" class="back"><- BACK</a>
+                <h1> PROGRESS </h1>
+                <p id="stats-subtitle">// YOUR INTERVIEW JOURNEY //</p>
+            </header>
+
+            <section class="stats-summary">
+                <div class="stat-card"><span id="stat-total-qs">0</span><label>QUESTIONS</label></div>
+                <div class="stat-card"><span id="stat-avg">0.0</span><label>AVG SCORE</label></div>
+                <div class="stat-card"><span id="start-streak">0</span><label>STREAK</label></div>
+                <div class="stat-card"><span id="stat-best-role">-</span><label>BEST ROLE</label></div>
+            </section>
+
+            <section class="charts-grid">
+                <div class="chart-container">
+                    <h3>SCORE OVER TIME</h3>
+                    <canvas id="chart-time-series"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3>BY ROLE</h3>
+                    <canvas id="chart-by-role"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3>BY DIFFICULTY</h3>
+                    <canvas id="chart-by-difficulty"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3>SCORE DISTRIBUTION</h3>
+                    <canvas id="chart-distribution"></canvas>
+                </div>
+            </section>
+
+            <section class="stats-action">
+                <button id="export-all-json" class="export-btn" onclick="exportJSON()">EXPORT ALL HISTORY</button>
+                <button id="export-all-pdf" class="export-btn pdf-btn" onclick="exportPDF()">EXPORT ALL HISTORY (PDF)</button>
+            </section>
+
+            <div class="footer">
+                <span>ArbeitHelp v1.0</span>
+            </div>
+        </div>
+
+        <script src="./stats.js"></script>
+    </body>
+</html>
