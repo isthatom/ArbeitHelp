@@ -2,22 +2,19 @@ import json
 import logging
 import os
 import time
-from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from urllib import error, request as urlrequest
 
-from dotenv import load_dotenv
-
-BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(BASE_DIR / ".env")
+from config import (
+    AI_ENABLED,
+    AI_MODEL,
+    AI_PROVIDER,
+    AI_TIMEOUT,
+    PROMPT_PATH,
+    QUESTION_PROMPT_PATH,
+)
 
 logger = logging.getLogger(__name__)
-
-AI_PROVIDER = "groq"
-AI_ENABLED = os.getenv("AI_ENABLED", "false").lower() == "true"
-AI_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
-AI_TIMEOUT = int(os.getenv("AI_TIMEOUT", "30"))
-PROMPT_PATH = BASE_DIR / "prompts" / "v1.0_system.txt"
-QUESTION_PROMPT_PATH = BASE_DIR / "prompts" / "v1.0_question_generator.txt"
 
 _fail_count = 0
 _circuit_open_until = 0
@@ -71,9 +68,9 @@ def _extract_usage(resp) -> tuple[int, int]:
 
 
 def _fallback_grade(role, question, answer, meta):
-    from app import grade
+    from app import rule_based_grade
 
-    feedback, points, breakdown = grade(role, answer, question)
+    feedback, points, breakdown = rule_based_grade(role, answer, question)
     return {
         "feedback": feedback,
         "points": points,
@@ -107,6 +104,9 @@ def _fallback_correct(role, question, answer, meta, feedback):
     }
 
 
+_executor = ThreadPoolExecutor(max_workers=4)
+
+
 def _invoke_ai(messages, system_prompt, expected_tokens_out=900):
     payload = {
         "model": AI_MODEL,
@@ -127,14 +127,30 @@ def _invoke_ai(messages, system_prompt, expected_tokens_out=900):
         },
         method="POST",
     )
-    try:
+
+    def _send():
         with urlrequest.urlopen(req, timeout=AI_TIMEOUT) as resp:
             return json.loads(resp.read().decode("utf-8"))
+
+    try:
+        future = _executor.submit(_send)
+        return future.result(timeout=AI_TIMEOUT)
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"groq_http_error:{exc.code}:{detail}") from exc
     except error.URLError as exc:
         raise RuntimeError(f"groq_network_error:{exc.reason}") from exc
+    except FutureTimeoutError as exc:
+        raise RuntimeError(f"groq_timeout:{AI_TIMEOUT}s exceeded") from exc
+
+
+def _question_metadata(meta):
+    return {
+        "keywords": meta.get("keywords", []),
+        "concepts": meta.get("concepts", []),
+        "common_mistakes": meta.get("common_mistakes", []),
+        "ideal_length": meta.get("ideal_length", 80),
+    }
 
 
 def _build_grade_prompt(role, question, answer, meta):
@@ -142,12 +158,7 @@ def _build_grade_prompt(role, question, answer, meta):
         "role": role,
         "question": question,
         "candidate_answer": answer,
-        "question_metadata": {
-            "keywords": meta.get("keywords", []),
-            "concepts": meta.get("concepts", []),
-            "common_mistakes": meta.get("common_mistakes", []),
-            "ideal_length": meta.get("ideal_length", 80),
-        },
+        "question_metadata": _question_metadata(meta),
         "grading_rules": {
             "points_range": [0, 3],
             "output_format": {"feedback": "string", "points": 0, "breakdown": "string"},
@@ -162,12 +173,7 @@ def _build_correct_prompt(role, question, answer, meta, feedback):
         "question": question,
         "candidate_answer": answer,
         "feedback": feedback,
-        "question_metadata": {
-            "keywords": meta.get("keywords", []),
-            "concepts": meta.get("concepts", []),
-            "common_mistakes": meta.get("common_mistakes", []),
-            "ideal_length": meta.get("ideal_length", 80),
-        },
+        "question_metadata": _question_metadata(meta),
         "output_format": {
             "improved_answer": "string",
             "changes": [{"type": "add|replace|remove", "original": "string", "improved": "string", "reason": "string"}],
@@ -237,6 +243,68 @@ def ai_generate_question(role, question_number, session_context, session_length=
     except Exception as exc:
         logger.exception("AI question generation failed: %s", exc)
         return None
+
+
+def _build_model_answer_prompt(role, question, meta):
+    payload = {
+        "role": role,
+        "question": question,
+        "question_metadata": _question_metadata(meta),
+        "output_format": {"model_answer": "string"},
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _fallback_model_answer(role, question, meta):
+    parts = ["A strong answer starts with a clear definition of the core idea."]
+    keywords = meta.get("keywords", [])
+    if keywords:
+        parts.append("Cover key terms: " + ", ".join(keywords[:4]) + ".")
+    concepts = meta.get("concepts", [])
+    if concepts:
+        parts.append("Explain the core concepts: " + ", ".join(concepts[:4]) + ".")
+    parts.append("Close with a concrete example from your experience or a real-world scenario.")
+    return " ".join(parts)
+
+
+def ai_model_answer(role, question, meta):
+    global _fail_count, _circuit_open_until
+    if not AI_ENABLED or not os.getenv("GROQ_API_KEY") or not _model_supported_or_fail():
+        return {"model_answer": _fallback_model_answer(role, question, meta), "ai_used": False, "fallback_reason": "ai_unavailable"}
+
+    if _circuit_open_until > time.time() or _fail_count >= _threshold:
+        _circuit_open_until = time.time() + _cooldown
+        return {"model_answer": _fallback_model_answer(role, question, meta), "ai_used": False, "fallback_reason": "ai_unavailable"}
+
+    try:
+        start = time.time()
+        resp = _invoke_ai([{"role": "user", "content": _build_model_answer_prompt(role, question, meta)}], load_system_prompt(), expected_tokens_out=900)
+        latency_ms = int((time.time() - start) * 1000)
+        text = _extract_text(resp)
+        result = json.loads(text)
+        model_answer = str(result.get("model_answer", "")).strip()
+        if not model_answer:
+            raise ValueError("invalid model answer response")
+
+        tokens_in, tokens_out = _extract_usage(resp)
+        _fail_count = 0
+        _circuit_open_until = 0
+        return {
+            "model_answer": model_answer,
+            "ai_used": True,
+            "fallback_reason": None,
+            "_meta": {
+                "provider": AI_PROVIDER,
+                "model": AI_MODEL,
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "latency_ms": latency_ms,
+            },
+        }
+    except Exception as exc:
+        _fail_count += 1
+        logger.exception("AI model answer failed: %s", exc)
+        return {"model_answer": _fallback_model_answer(role, question, meta), "ai_used": False, "fallback_reason": "ai_error"}
 
 
 def ai_grade(role, question, answer, meta):

@@ -5,17 +5,24 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ArbietHelp - AI Interviewer</title>
-    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+    <title>ArbeitHelp - AI Interviewer</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="./questions.css">
+    <script src="./common.js" defer></script>
     <script src="./questions.js" defer></script>
 </head>
 
 <body>
 
+    <div class="term-bar" aria-hidden="true">
+        <span>ARBEITHELP://interview</span>
+        <span class="term-bar-right">v1.0 // session</span>
+    </div>
+
     <div class="header">
         <a href="index.html" class="back"><- CHANGE ROLE</a>
-                <h1 id="role-title">ArbietHelp</h1>
+                <h1 id="role-title">ArbeitHelp</h1>
                 <p id="role-subtitle">// INTERVIEW MODE //</p>
 
     </div>
@@ -69,8 +76,20 @@
         </div>
         <div id="feedback-text"></div>
         <div id="feedback-breakdown"></div>
+        <button id="model-answer-btn" class="hidden" onclick="showModelAnswer()">SHOW MODEL ANSWER</button>
+        <div id="model-answer-box" class="hidden">
+            <div class="model-answer-head">MODEL ANSWER</div>
+            <div id="model-answer-text"></div>
+        </div>
         <button id="next-btn" onclick="nextQuestion()">NEXT QUESTION -></button>
 
+    </div>
+
+    <div id="recap-box" class="hidden">
+        <div class="box-label">
+            <span>SESSION RECAP</span>
+        </div>
+        <div id="recap-list"></div>
     </div>
 
     <div id="correction-modal" class="hidden">
@@ -94,7 +113,7 @@
     <div class="footer">
         <span>SCORE: <span id="score">0</span>PTS</span>
         <span>ANSWERED: <span id="q-count"></span></span>
-        <span>ArbietHelp v1.0</span>
+        <span>ArbeitHelp v1.0</span>
     </div>
 </body>
 

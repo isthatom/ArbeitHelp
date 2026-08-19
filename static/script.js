@@ -25,27 +25,7 @@ async function loadRoles() {
     }); // format of the role names, done to avoid repetitions
 }
 
-// auth stuff for stats page
-async function initAuth() {
-    const existingToken = localStorage.getItem('auth_token');
-    if (existingToken) return existingToken;
-
-    const anonEmail = 'anon_' + Math.random().toString(36).substr(2, 9) + '@arbiethelp.local';
-    const res = await fetch('/auth/signup', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({email: anonEmail, password: 'anon', role: ''})
-    });
-
-    if (res.ok) {
-        const data = await res.json();
-        localStorage.setItem('auth_token', data.token);
-        return data.token;
-    }
-    return null;
-}
-
-//calling function defined above
+// jump into the interview for the selected role
 function selectRole(role) {
     window.location.href = `questions.html?role=${encodeURIComponent(role)}`;
 }

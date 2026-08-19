@@ -1,11 +1,11 @@
-var authToken = localStorage.getItem('auth_token');
-var timeSeriesChart = null, roleChart = null, diffChart = null, distChart = null;
+let authToken = localStorage.getItem('auth_token');
+let timeSeriesChart = null, roleChart = null, diffChart = null, distChart = null;
 
 async function init() {
     authToken = localStorage.getItem('auth_token');
     if (!authToken) { location.href = 'index.html'; return; }
 
-    var r = await fetch('/stats/unlock-status', { headers: { 'Authorisation': 'Bearer ' + authToken }});
+    var r = await fetch('/stats/unlock-status', { headers: authHeaders(authToken) });
     var d = await r.json();
     if (!d.unlocked) {
         document.getElementById('lock-answered').textContent = d.answered;
@@ -17,7 +17,7 @@ async function init() {
     document.getElementById('lock-screen').classList.add('hidden');
     document.getElementById('stats-content').classList.remove('hidden');
 
-    fetch('/stats/summary', { headers: { 'Authorisation': 'Bearer ' + authToken }})
+    fetch('/stats/summary', { headers: authHeaders(authToken) })
         .then(function(r) { return r.json(); })
         .then(function(d) {
             document.getElementById('stat-total-qs').textContent = d.total_questions;
@@ -27,13 +27,39 @@ async function init() {
         })
         .catch(function() { alert('stat failed'); });
 
-    fetch('/stats/chart-data', { headers: { 'Authorisation': 'Bearer ' + authToken }})
+    fetch('/stats/chart-data', { headers: authHeaders(authToken) })
         .then(function(r) { return r.json(); })
         .then(function(d) { buildCharts(d); })
         .catch(function() {});
 }
 
+function renderWeakTopics(topics) {
+    var section = document.getElementById('weak-topics');
+    var listEl = document.getElementById('weak-topics-list');
+    if (!section || !listEl) return;
+    if (!topics || !topics.length) {
+        section.style.display = 'none';
+        return;
+    }
+    section.style.display = '';
+    listEl.replaceChildren();
+    topics.forEach(function(t) {
+        var row = document.createElement('div');
+        row.className = 'weak-topic-row';
+        var name = document.createElement('span');
+        name.className = 'weak-topic-name';
+        name.textContent = t.topic;
+        var meta = document.createElement('span');
+        meta.className = 'weak-topic-meta';
+        meta.textContent = t.avg_score.toFixed(1) + ' AVG // ' + t.count + 'X';
+        row.appendChild(name);
+        row.appendChild(meta);
+        listEl.appendChild(row);
+    });
+}
+
 function buildCharts(d) {
+    renderWeakTopics(d.weak_topics || []);
     if (!d.time_series || !d.time_series.length) {
         var cans = document.querySelectorAll('.chart-container canvas');
         for (let i = 0; i < cans.length; i++) cans[i].style.display = 'none';
@@ -107,19 +133,29 @@ function buildCharts(d) {
     }
 }
 
+async function downloadBlob(url, filename) {
+    var r = await fetch(url, { headers: authHeaders(authToken) });
+    if (r.status === 401) {
+        localStorage.removeItem('auth_token');
+        location.href = 'index.html';
+        return false;
+    }
+    if (!r.ok) throw new Error('download failed');
+    var blob = await r.blob();
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    return true;
+}
+
 async function exportJSON() {
     var btn = document.getElementById('export-all-json');
     var txt = btn.textContent;
     btn.disabled = true; btn.textContent = 'EXPORTING...';
     try {
-        var r = await fetch('/stats/export/json', { headers: { 'Authorisation': 'Bearer ' + authToken }});
-        if (r.status === 401) { localStorage.removeItem('auth_token'); location.href = 'index.html'; return; }
-        var blob = await r.blob();
-        var a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'arbiethelp_history_' + new Date().toISOString().split('T')[0] + '.json';
-        a.click();
-        URL.revokeObjectURL(a.href);
+        await downloadBlob('/stats/export/json', 'arbiethelp_history_' + new Date().toISOString().split('T')[0] + '.json');
     } catch(e) { alert('Export failed'); }
     finally { btn.disabled = false; btn.textContent = txt; }
 }
@@ -128,18 +164,7 @@ function exportPDF() {
     var btn = document.getElementById('export-all-pdf');
     var txt = btn.textContent;
     btn.disabled = true; btn.textContent = 'GENERATING PDF...';
-    fetch('/stats/export/pdf', { headers: { 'Authorisation': 'Bearer ' + authToken }})
-        .then(function(r) {
-            if (r.status === 401) { localStorage.removeItem('auth_token'); location.href = 'index.html'; throw 'auth'; }
-            return r.blob();
-        })
-        .then(function(blob) {
-            var a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = 'arbiethelp_report_' + new Date().toISOString().split('T')[0] + '.pdf';
-            a.click();
-            URL.revokeObjectURL(a.href);
-        })
+    downloadBlob('/stats/export/pdf', 'arbiethelp_report_' + new Date().toISOString().split('T')[0] + '.pdf')
         .catch(function(e) { if (e !== 'auth') alert('PDF generation failed'); })
         .finally(function() { btn.disabled = false; btn.textContent = txt; });
 }

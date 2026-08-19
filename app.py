@@ -5,25 +5,24 @@ import random
 import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-
-from dotenv import load_dotenv
-
-BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(BASE_DIR / ".env")
+from io import BytesIO
 
 import jwt
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from ai_teacher import AI_ENABLED, AI_MODEL, ai_correct, ai_generate_question, ai_grade
-
-DB_PATH = BASE_DIR / "app_data.sqlite3"
-QUESTION_FILE = BASE_DIR / "questions.json"
-SECRET_FILE = BASE_DIR / ".jwt_secret"
-TOKEN_EXPIRY_HOURS = 24 * 7
-SESSION_LENGTH = 5
-QUESTION_SOURCE_AI = "ai"
-QUESTION_SOURCE_FALLBACK = "fallback"
+from ai_teacher import ai_correct, ai_generate_question, ai_grade, ai_model_answer
+from config import (
+    AI_ENABLED,
+    AI_MODEL,
+    DB_PATH,
+    QUESTION_FILE,
+    QUESTION_SOURCE_AI,
+    QUESTION_SOURCE_FALLBACK,
+    SECRET_FILE,
+    SESSION_LENGTH,
+    STATIC_DIR,
+    TOKEN_EXPIRY_HOURS,
+)
 
 
 def _load_secret() -> str:
@@ -39,7 +38,7 @@ def _load_secret() -> str:
 
 SECRET_KEY = _load_secret()
 
-app = Flask(__name__, static_folder=".")
+app = Flask(__name__, static_folder=None)
 
 with open(QUESTION_FILE, "r", encoding="utf-8") as f:
     ROLE_DATA = json.load(f)["roles"]
@@ -109,6 +108,7 @@ def _migrate_db():
             "question_topic": "TEXT",
             "question_difficulty": "TEXT",
             "generation_error": "TEXT",
+            "model_answer": "TEXT",
         }
         for column_name, ddl in columns_to_add.items():
             if column_name not in existing_columns:
@@ -210,22 +210,20 @@ def _normalize_text(text):
     return re.sub(r"\s+", " ", (text or "").strip().lower())
 
 
-def _session_progress(session_id):
-    with _db() as conn:
-        session = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
-        attempts = conn.execute(
-            "SELECT * FROM attempts WHERE session_id = ? ORDER BY question_index ASC, id ASC",
-            (session_id,),
-        ).fetchall()
+def _session_state(session, attempts):
     answered_count = int(session["current_q_index"]) if session else 0
     total_points = sum(int(a["points"] or 0) for a in attempts if not a["skipped"] and a["points"] is not None)
-    return session, attempts, {
+    return {
         "question_number": answered_count + 1 if session and not session["finalized"] else SESSION_LENGTH,
         "questions_answered": answered_count,
         "session_length": SESSION_LENGTH,
         "session_score": total_points,
         "session_completed": bool(session and session["finalized"]),
     }
+
+
+def _session_progress(session_id):
+    return _session_state(_load_session(session_id), _session_attempts(session_id))
 
 
 def _question_source_label(source):
@@ -243,9 +241,9 @@ def _generation_context(attempts):
             "feedback": attempt["feedback"],
             "points": attempt["points"],
             "grader": attempt["grader"],
-            "question_source": attempt["question_source"] if "question_source" in attempt.keys() else QUESTION_SOURCE_FALLBACK,
-            "topic": attempt["question_topic"] if "question_topic" in attempt.keys() else None,
-            "difficulty": attempt["question_difficulty"] if "question_difficulty" in attempt.keys() else None,
+            "question_source": attempt["question_source"],
+            "topic": attempt["question_topic"],
+            "difficulty": attempt["question_difficulty"],
             "skipped": bool(attempt["skipped"]),
         }
         for attempt in attempts
@@ -343,11 +341,7 @@ def _next_question(session):
     if index >= SESSION_LENGTH:
         return None, None
 
-    with _db() as conn:
-        attempts = conn.execute(
-            "SELECT * FROM attempts WHERE session_id = ? ORDER BY question_index ASC, id ASC",
-            (session["id"],),
-        ).fetchall()
+    attempts = _session_attempts(session["id"])
 
     used_questions = {_normalize_text(a["question_text"]) for a in attempts}
     context = _generation_context(attempts)
@@ -393,10 +387,30 @@ def _finalize_session(session_id):
         )
 
 
+def _advance_session(conn, session_id, skipped=False):
+    if skipped:
+        conn.execute(
+            "UPDATE sessions SET current_q_index = current_q_index + 1, skipped_count = skipped_count + 1 WHERE id = ?",
+            (session_id,),
+        )
+    else:
+        conn.execute(
+            "UPDATE sessions SET current_q_index = current_q_index + 1 WHERE id = ?",
+            (session_id,),
+        )
+    row = conn.execute("SELECT current_q_index FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    finalized = bool(row) and int(row["current_q_index"]) >= SESSION_LENGTH
+    if finalized:
+        conn.execute(
+            "UPDATE sessions SET finalized = 1, completed_at = COALESCE(completed_at, ?) WHERE id = ?",
+            (_iso_now(), session_id),
+        )
+    return finalized
+
+
 def _session_summary(session_id):
-    with _db() as conn:
-        session = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
-        attempts = conn.execute("SELECT * FROM attempts WHERE session_id = ? ORDER BY question_index ASC", (session_id,)).fetchall()
+    session = _load_session(session_id)
+    attempts = _session_attempts(session_id)
     total_points = sum(int(a["points"] or 0) for a in attempts if not a["skipped"])
     return {
         "session_id": session_id,
@@ -417,10 +431,10 @@ def _session_summary(session_id):
                 "grader": a["grader"],
                 "ai_used": bool(a["ai_used"]),
                 "skipped": bool(a["skipped"]),
-                "question_source": a["question_source"] if "question_source" in a.keys() else QUESTION_SOURCE_FALLBACK,
-                "question_source_label": _question_source_label(a["question_source"] if "question_source" in a.keys() else QUESTION_SOURCE_FALLBACK),
-                "topic": a["question_topic"] if "question_topic" in a.keys() else None,
-                "difficulty": a["question_difficulty"] if "question_difficulty" in a.keys() else None,
+                "question_source": a["question_source"],
+                "question_source_label": _question_source_label(a["question_source"]),
+                "topic": a["question_topic"],
+                "difficulty": a["question_difficulty"],
             }
             for a in attempts
         ],
@@ -429,12 +443,12 @@ def _session_summary(session_id):
 
 @app.route("/")
 def index():
-    return send_from_directory(".", "index.html")
+    return send_from_directory(STATIC_DIR, "index.html")
 
 
 @app.route("/<path:filename>")
 def static_files(filename):
-    return send_from_directory(".", filename)
+    return send_from_directory(STATIC_DIR, filename)
 
 
 @app.route("/auth/signup", methods=["POST"])
@@ -511,25 +525,23 @@ def session_question():
         return err
     if session["finalized"] or int(session["current_q_index"]) >= SESSION_LENGTH: # type: ignore
         return jsonify({"error": "session complete", "completed": True, "summary": _session_summary(session["id"])}), 409
-    session_state = _session_progress(session["id"])[2]
+    session_state = _session_state(session, _session_attempts(session["id"]))
     existing = _current_attempt(session["id"], int(session["current_q_index"]))
     if existing:
-        payload = {
-            "question": existing["question_text"],
-            "role": session["role"],
-            "topic": existing["question_topic"] if "question_topic" in existing.keys() else None,
-            "difficulty": existing["question_difficulty"] if "question_difficulty" in existing.keys() else None,
-            "question_number": int(existing["question_index"]) + 1,
-            "questions_answered": session_state["questions_answered"],
-            "session_length": SESSION_LENGTH,
-            "session_score": session_state["session_score"],
-            "session_completed": session_state["session_completed"],
-            "question_source": existing["question_source"] if "question_source" in existing.keys() else QUESTION_SOURCE_FALLBACK,
-            "question_source_label": _question_source_label(existing["question_source"] if "question_source" in existing.keys() else QUESTION_SOURCE_FALLBACK),
-            "resume": True,
-        }
-        return jsonify(payload)
-    chosen, index = _next_question(session)
+        return jsonify(
+            _question_response(
+                session,
+                {
+                    "question": existing["question_text"],
+                    "topic": existing["question_topic"],
+                    "difficulty": existing["question_difficulty"],
+                },
+                existing["question_source"],
+                session_state,
+                resume=True,
+            )
+        )
+    chosen, _ = _next_question(session)
     if not chosen:
         _finalize_session(session["id"])
         return jsonify({"error": "session complete", "completed": True, "summary": _session_summary(session["id"])}), 409
@@ -553,6 +565,26 @@ def _grade_and_store(session, answer, skipped=False, question_text=None):
     if not current:
         current = {"question_text": question_text, "question_index": int(session["current_q_index"])}
     question_text = current["question_text"]
+
+    if not skipped and "points" in current.keys() and current["points"] is not None and current["answer"]:
+        return {
+            "feedback": current["feedback"] or "",
+            "points": int(current["points"]),
+            "breakdown": current["breakdown"] or "",
+            "max_points": 3,
+            "grader": current["grader"] or "rule",
+            "ai_used": bool(current["ai_used"]),
+            "fallback_reason": current["fallback_reason"],
+            "question_number": int(current["question_index"]) + 1,
+            "next_question_number": min(int(current["question_index"]) + 2, SESSION_LENGTH),
+            "questions_answered": int(session["current_q_index"]),
+            "session_score": sum(
+                int(a["points"] or 0) for a in attempts if not a["skipped"] and a["points"] is not None
+            ),
+            "session_length": SESSION_LENGTH,
+            "session_completed": bool(session["finalized"]),
+        }, None
+
     meta = next((q for q in pool if q["q"] == question_text), {})
     if skipped:
         with _db() as conn:
@@ -560,11 +592,8 @@ def _grade_and_store(session, answer, skipped=False, question_text=None):
                 "UPDATE attempts SET skipped = 1, answer = NULL, grader = 'skipped', ai_used = 0, fallback_reason = NULL WHERE session_id = ? AND question_index = ?",
                 (session["id"], current["question_index"]),
             )
-            conn.execute(
-                "UPDATE sessions SET current_q_index = current_q_index + 1, skipped_count = skipped_count + 1 WHERE id = ?",
-                (session["id"],),
-            )
-        _, _, session_state = _session_progress(session["id"])
+            _advance_session(conn, session["id"], skipped=True)
+        session_state = _session_progress(session["id"])
         return {
             "skipped": True,
             "question": question_text,
@@ -606,19 +635,9 @@ def _grade_and_store(session, answer, skipped=False, question_text=None):
                 current["question_index"],
             ),
         )
-        conn.execute(
-            "UPDATE sessions SET current_q_index = current_q_index + 1 WHERE id = ?",
-            (session["id"],),
-        )
-        updated = conn.execute("SELECT current_q_index, finalized FROM sessions WHERE id = ?", (session["id"],)).fetchone()
-        if int(updated["current_q_index"]) >= SESSION_LENGTH:
-            conn.execute(
-                "UPDATE sessions SET finalized = 1, completed_at = COALESCE(completed_at, ?) WHERE id = ?",
-                (_iso_now(), session["id"]),
-            )
-            updated = conn.execute("SELECT current_q_index, finalized FROM sessions WHERE id = ?", (session["id"],)).fetchone()
+        finalized = _advance_session(conn, session["id"])
 
-    _, _, session_state = _session_progress(session["id"])
+    session_state = _session_progress(session["id"])
     result = {
         "feedback": feedback,
         "points": points,
@@ -632,7 +651,7 @@ def _grade_and_store(session, answer, skipped=False, question_text=None):
         "questions_answered": session_state["questions_answered"],
         "session_score": session_state["session_score"],
         "session_length": SESSION_LENGTH,
-        "session_completed": bool(updated["finalized"]),
+        "session_completed": bool(finalized),
     }
     if ai_result.get("_meta"):
         result["ai_meta"] = ai_result["_meta"]
@@ -662,11 +681,34 @@ def session_skip():
     result, err = _grade_and_store(session, "", skipped=True)
     if err:
         return err
-    if int(_load_session(session["id"])["current_q_index"]) >= SESSION_LENGTH: 
-        _finalize_session(session["id"])
-        _, _, session_state = _session_progress(session["id"])
-        result["session_completed"] = session_state["session_completed"]
     return jsonify(result)
+
+
+@app.route("/session/model-answer", methods=["POST"])
+def session_model_answer():
+    session, err = _require_session()
+    if err:
+        return err
+    attempts = _session_attempts(session["id"])
+    current = attempts[-1] if attempts else None
+    if not current or current["skipped"] or not current["answer"]:
+        return jsonify({"error": "no answered question"}), 400
+    if current["model_answer"]:
+        return jsonify({"model_answer": current["model_answer"], "cached": True, "ai_used": bool(current["ai_used"])})
+    pool = _questions_for_role(session["role"])
+    meta = next((q for q in pool if q["q"] == current["question_text"]), {})
+    result = ai_model_answer(session["role"], current["question_text"], meta)
+    with _db() as conn:
+        conn.execute(
+            "UPDATE attempts SET model_answer = ? WHERE id = ?",
+            (result["model_answer"], current["id"]),
+        )
+    return jsonify({
+        "model_answer": result["model_answer"],
+        "cached": False,
+        "ai_used": bool(result.get("ai_used")),
+        "fallback_reason": result.get("fallback_reason"),
+    })
 
 
 @app.route("/correct", methods=["POST"])
@@ -702,8 +744,8 @@ def correct():
     return jsonify(payload)
 
 
-def grade(role, answer, question):
-    meta = next((q for q in QUESTIONS.get(role, []) if q["q"] == question), None)
+def rule_based_grade(role, answer, question):
+    meta = next((q for q in _questions_for_role(role) if q["q"] == question), None)
     if not meta:
         return basic_grade(answer)
     answer_lower = answer.lower()
@@ -760,13 +802,59 @@ def basic_grade(answer):
     return "Rule-based grading applied. Strong answer.", 3, "strong detail"
 
 
+def _answered_attempts(user_email):
+    with _db() as conn:
+        return conn.execute(
+            "SELECT * FROM attempts WHERE user_email = ? AND skipped = 0 AND points IS NOT NULL ORDER BY created_at ASC",
+            (user_email,),
+        ).fetchall()
+
+
+def _user_sessions_attempts(user_email):
+    with _db() as conn:
+        sessions = conn.execute(
+            "SELECT * FROM sessions WHERE user_email = ? ORDER BY started_at ASC",
+            (user_email,),
+        ).fetchall()
+        attempts = conn.execute(
+            "SELECT * FROM attempts WHERE user_email = ? ORDER BY created_at ASC",
+            (user_email,),
+        ).fetchall()
+    return sessions, attempts
+
+
+def _role_averages(attempts):
+    by_role = {}
+    for a in attempts:
+        by_role.setdefault(a["role"], []).append(int(a["points"]))
+    return {role: sum(scores) / len(scores) for role, scores in by_role.items()}
+
+
+def _best_role(attempts):
+    averages = _role_averages(attempts)
+    return max(averages, key=averages.get) if averages else "-"
+
+
+def _weak_topics(attempts):
+    by_topic = {}
+    for a in attempts:
+        topic = (a["question_topic"] or "general").strip()
+        by_topic.setdefault(topic, []).append(int(a["points"]))
+    rows = [
+        {"topic": topic, "avg_score": round(sum(scores) / len(scores), 2), "count": len(scores)}
+        for topic, scores in by_topic.items()
+        if len(scores) >= 2
+    ]
+    rows.sort(key=lambda r: r["avg_score"])
+    return rows[:5]
+
+
 @app.route("/stats/unlock-status")
 def stats_unlock():
     user_id, err = _check_user()
     if err:
         return err
-    with _db() as conn:
-        answered = conn.execute("SELECT COUNT(*) AS c FROM attempts WHERE user_email = ? AND skipped = 0 AND points IS NOT NULL", (user_id,)).fetchone()["c"]
+    answered = len(_answered_attempts(user_id))
     return jsonify({"unlocked": answered >= 1, "answered": answered, "required": 1})
 
 
@@ -775,13 +863,8 @@ def stats_summary():
     user_id, err = _check_user()
     if err:
         return err
-    with _db() as conn:
-        attempts = conn.execute("SELECT * FROM attempts WHERE user_email = ? AND skipped = 0 AND points IS NOT NULL ORDER BY created_at ASC", (user_id,)).fetchall()
+    attempts = _answered_attempts(user_id)
     points = [int(a["points"]) for a in attempts]
-    by_role = {}
-    for a in attempts:
-        by_role.setdefault(a["role"], []).append(int(a["points"]))
-    best_role = max(by_role, key=lambda r: sum(by_role[r]) / len(by_role[r])) if by_role else "-"
     completed_dates = []
     with _db() as conn:
         sessions = conn.execute("SELECT completed_at FROM sessions WHERE user_email = ? AND completed_at IS NOT NULL", (user_id,)).fetchall()
@@ -796,7 +879,7 @@ def stats_summary():
         while current in dates:
             streak += 1
             current = (datetime.fromisoformat(current).date() - timedelta(days=1)).isoformat()
-    return jsonify({"total_questions": len(points), "avg_score": round(sum(points) / len(points), 1) if points else 0.0, "streak": streak, "best_role": best_role})
+    return jsonify({"total_questions": len(points), "avg_score": round(sum(points) / len(points), 1) if points else 0.0, "streak": streak, "best_role": _best_role(attempts)})
 
 
 @app.route("/stats/chart-data")
@@ -804,26 +887,22 @@ def stats_chart_data():
     user_id, err = _check_user()
     if err:
         return err
-    with _db() as conn:
-        attempts = conn.execute("SELECT * FROM attempts WHERE user_email = ? AND skipped = 0 AND points IS NOT NULL ORDER BY created_at ASC", (user_id,)).fetchall()
+    attempts = _answered_attempts(user_id)
     time_series = [
         {"index": i + 1, "date": a["created_at"][:10], "score": int(a["points"]), "role": a["role"], "question": a["question_text"][:50]}
         for i, a in enumerate(attempts)
     ]
-    by_role = {}
-    for a in attempts:
-        by_role.setdefault(a["role"], []).append(int(a["points"]))
-    by_role_avg = {role: round(sum(scores) / len(scores), 2) for role, scores in by_role.items()}
+    by_role_avg = {role: round(avg, 2) for role, avg in _role_averages(attempts).items()}
     by_difficulty = {"easy": [], "medium": [], "hard": []}
     for a in attempts:
-        meta = next((q for q in QUESTIONS.get(a["role"], []) if q["q"] == a["question_text"]), {})
+        meta = next((q for q in _questions_for_role(a["role"]) if q["q"] == a["question_text"]), {})
         diff = _difficulty(meta.get("ideal_length", 80))
         by_difficulty[diff].append(int(a["points"]))
     by_diff_avg = {diff: round(sum(scores) / len(scores), 2) for diff, scores in by_difficulty.items() if scores}
     dist = {0: 0, 1: 0, 2: 0, 3: 0}
     for a in attempts:
         dist[int(a["points"])] += 1
-    return jsonify({"time_series": time_series, "by_role": by_role_avg, "by_difficulty": by_diff_avg, "distribution": dist})
+    return jsonify({"time_series": time_series, "by_role": by_role_avg, "by_difficulty": by_diff_avg, "distribution": dist, "weak_topics": _weak_topics(attempts)})
 
 
 @app.route("/stats/export/json")
@@ -831,9 +910,7 @@ def export_json():
     user_id, err = _check_user()
     if err:
         return err
-    with _db() as conn:
-        sessions = conn.execute("SELECT * FROM sessions WHERE user_email = ? ORDER BY started_at ASC", (user_id,)).fetchall()
-        attempts = conn.execute("SELECT * FROM attempts WHERE user_email = ? ORDER BY created_at ASC", (user_id,)).fetchall()
+    sessions, attempts = _user_sessions_attempts(user_id)
     payload = {
         "sessions": [dict(row) for row in sessions],
         "attempts": [dict(row) for row in attempts],
@@ -850,9 +927,7 @@ def export_pdf():
         from fpdf import FPDF
     except ImportError:
         return jsonify({"error": "PDF generation not available"}), 503
-    with _db() as conn:
-        sessions = conn.execute("SELECT * FROM sessions WHERE user_email = ? ORDER BY started_at ASC", (user_id,)).fetchall()
-        attempts = conn.execute("SELECT * FROM attempts WHERE user_email = ? ORDER BY created_at ASC", (user_id,)).fetchall()
+    sessions, attempts = _user_sessions_attempts(user_id)
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 18)
@@ -871,8 +946,6 @@ def export_pdf():
             if a["feedback"]:
                 pdf.multi_cell(0, 5, f"Feedback: {a['feedback']}")
             pdf.ln(2)
-    from io import BytesIO
-
     buf = BytesIO()
     pdf.output(buf)
     buf.seek(0)
