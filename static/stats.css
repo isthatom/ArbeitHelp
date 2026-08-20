@@ -1,0 +1,372 @@
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323:wght@400&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+:root {
+    --paper: #f4f5f2;
+    --paper-wash: #eef0ec;
+    --ink: #16181d;
+    --ink-soft: #434a55;
+    --muted: #858b95;
+    --line: #d9dcd7;
+    --line-strong: #16181d;
+    --phosphor: #1e7a34;
+    --phosphor-bright: #2b9c4a;
+    --phosphor-wash: #e7f3ea;
+    --blue: #2563eb;
+    --amber: #b88600;
+    --red: #c0352b;
+}
+
+* {margin: 0; padding: 0; box-sizing: border-box;}
+
+body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'VT323', monospace;
+    font-size: 1.2rem;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px 80px;
+    gap: 28px;
+}
+
+/* Terminal window chrome */
+.term-bar {
+    width: 100%;
+    max-width: 1000px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 9px 14px;
+    background: var(--ink);
+    color: var(--phosphor-bright);
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 1px;
+    border: 2px solid var(--ink);
+}
+
+.term-bar-right {
+    color: var(--paper);
+}
+
+.stats-header {
+    text-align: center;
+    margin-bottom: 8px;
+    width: 100%;
+    max-width: 1000px;
+}
+
+.stats-header h1 {
+    font-family: 'Press Start 2P', monospace;
+    font-size: clamp(0.9rem, 3vw, 1.4rem);
+    letter-spacing: 3px;
+    text-shadow: 4px 4px 0 var(--line);
+    margin-bottom: 8px;
+}
+
+.stats-header p {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--ink-soft);
+    letter-spacing: 3px;
+    margin-bottom: 12px;
+}
+
+.back {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--muted);
+    text-decoration: none;
+    letter-spacing: 2px;
+    display: inline-block;
+    margin-bottom: 14px;
+}
+
+.back:hover {color: var(--ink);}
+
+.stats-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    width: 100%;
+    max-width: 1000px;
+    margin-bottom: 28px;
+}
+
+.stat-card {
+    background: #fff;
+    border: 2px solid var(--line-strong);
+    padding: 28px 16px;
+    text-align: center;
+    transition: transform 0.12s, box-shadow 0.12s;
+}
+
+.stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 6px 6px 0 var(--line);
+}
+
+.stat-card span {
+    display: block;
+    font-family: 'Press Start 2P', monospace;
+    font-size: clamp(1.2rem, 4vw, 1.8rem);
+    color: var(--phosphor);
+    text-shadow: 3px 3px 0 var(--line);
+    line-height: 1.2;
+    margin-bottom: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+#stat-best-role {
+    font-size: clamp(0.7rem, 2.5vw, 1rem);
+}
+
+.stat-card label {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.5rem;
+    letter-spacing: 1px;
+    color: var(--ink-soft);
+    text-transform: uppercase;
+}
+
+.charts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    gap: 20px;
+    width: 100%;
+    max-width: 1000px;
+    margin-bottom: 28px;
+}
+
+.chart-container {
+    background: #fff;
+    border: 2px solid var(--line-strong);
+    padding: 20px;
+    min-height: 350px;
+    display: flex;
+    flex-direction: column;
+}
+
+.chart-container h3 {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.55rem;
+    letter-spacing: 1px;
+    color: var(--ink-soft);
+    text-shadow: 2px 2px 0 var(--line);
+    margin-bottom: 16px;
+    text-align: center;
+}
+
+.chart-container canvas {
+    flex: 1;
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.stats-action {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+}
+
+.stats-weak {
+    width: 100%;
+    max-width: 1000px;
+    background: #fff;
+    border: 2px solid var(--line-strong);
+    padding: 20px;
+    margin-bottom: 28px;
+}
+
+.stats-weak h3 {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.55rem;
+    letter-spacing: 1px;
+    color: var(--red);
+    text-shadow: 2px 2px 0 var(--line);
+    margin-bottom: 16px;
+    text-align: center;
+}
+
+.weak-topics-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.weak-topic-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: #fdecea;
+    border-left: 4px solid var(--red);
+}
+
+.weak-topic-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--ink);
+    text-transform: uppercase;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.weak-topic-meta {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.5rem;
+    color: var(--red);
+    white-space: nowrap;
+}
+
+.export-btn {
+    border: 2px solid var(--line-strong);
+    background: var(--ink);
+    color: var(--paper);
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.55rem;
+    padding: 16px 24px;
+    cursor: pointer;
+    letter-spacing: 2px;
+    transition: background 0.12s, color 0.12s, transform 0.05s;
+    white-space: nowrap;
+}
+
+.export-btn:hover:not(:disabled) {
+    background: #fff;
+    color: var(--ink);
+    transform: translateY(-1px);
+}
+
+.export-btn:disabled {
+    background: var(--line);
+    border-color: var(--line);
+    color: var(--muted);
+    cursor: not-allowed;
+    transform: none;
+}
+
+.export-btn.pdf-btn {
+    border-color: var(--phosphor);
+    background: var(--phosphor);
+}
+
+.export-btn.pdf-btn:hover:not(:disabled) {
+    background: #fff;
+    color: var(--phosphor);
+}
+
+.footer {
+    width: 100%;
+    max-width: 1000px;
+    text-align: center;
+    color: var(--ink-soft);
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.55rem;
+    letter-spacing: 1px;
+    text-shadow: 2px 2px 0 var(--line);
+    padding-top: 20px;
+    border-top: 2px solid var(--line-strong);
+}
+
+/* Lock Screen */
+.lock-screen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 60vh;
+    text-align: center;
+    background: #fff;
+    border: 2px solid var(--line-strong);
+    border-top: 6px solid var(--red);
+    padding: 60px 40px;
+    max-width: 500px;
+    width: 90%;
+    margin: 0 auto;
+}
+
+.lock-screen.hidden { display: none; }
+
+.lock-screen h2 {
+    font-family: 'Press Start 2P', monospace;
+    font-size: clamp(0.7rem, 2.5vw, 1rem);
+    letter-spacing: 2px;
+    text-shadow: 3px 3px 0 var(--line);
+    margin-bottom: 20px;
+    color: var(--red);
+}
+
+.lock-screen p {
+    font-family: 'VT323', monospace;
+    font-size: 1.3rem;
+    color: var(--ink);
+    margin: 10px 0;
+}
+
+.lock-screen p span {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.8rem;
+    color: var(--phosphor);
+    font-weight: bold;
+}
+
+#lock-start-btn {
+    display: inline-block;
+    margin-top: 28px;
+    padding: 16px 32px;
+    border: 2px solid var(--phosphor);
+    background: var(--phosphor);
+    color: #fff;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.5rem;
+    letter-spacing: 1px;
+    text-decoration: none;
+    transition: background 0.12s, color 0.12s;
+}
+
+#lock-start-btn:hover {
+    background: #fff;
+    color: var(--phosphor);
+}
+
+:focus-visible {
+    outline: 3px solid var(--phosphor-bright);
+    outline-offset: 2px;
+}
+
+@media (max-width: 768px) {
+    .charts-grid {
+        grid-template-columns: 1fr;
+    }
+    .chart-container {
+        min-height: 300px;
+    }
+    .stats-summary {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 480px) {
+    .stats-summary {
+        grid-template-columns: 1fr;
+    }
+    .stats-action {
+        flex-direction: column;
+        align-items: center;
+    }
+    .export-btn {
+        width: 100%;
+        max-width: 300px;
+    }
+}

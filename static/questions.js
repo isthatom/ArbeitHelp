@@ -1,8 +1,7 @@
-const TIMER_SECONDS = 90;
+const TIMER_SECONDS = 120;
 const SESSION_LENGTH_DEFAULT = 5;
 
 let role = null;
-let score = 0;
 let questionsAnswered = 0;
 let currentQuestionNumber = 1;
 let sessionLength = SESSION_LENGTH_DEFAULT;
@@ -13,20 +12,16 @@ let timerHidden = false;
 let authToken = null;
 let sessionToken = null;
 let sessionCompleted = false;
-let currentQuestionSource = '';
 let currentImproved = '';
 let currentChanges = [];
 let currentCorrectionUsesAI = false;
 let submitAbortControl = null;
+let submitTimeoutId = null;
 let isSubmitting = false;
-let legacyRetries = 0;
+let questionLoadRetries = 0;
 
 function el(id) {
     return document.getElementById(id);
-}
-
-function authHeaders(token) {
-    return {'Content-Type': 'application/json', 'Authorisation': 'Bearer ' + token};
 }
 
 function setSessionStorage(token, currentRole) {
@@ -37,36 +32,6 @@ function setSessionStorage(token, currentRole) {
 function clearSessionStorage() {
     localStorage.removeItem('session_token');
     localStorage.removeItem('session_role');
-}
-
-async function fetchJSON(url, options) {
-    const res = await fetch(url, options);
-    if (res.ok) return res;
-    const err = new Error(`Server said ${res.status}`);
-    err.status = res.status;
-    err.response = res;
-    throw err;
-}
-
-async function initAuth() {
-    try {
-        const existingToken = localStorage.getItem('auth_token');
-        if (existingToken) return existingToken;
-        const anonymousEmail = 'anonymous_' + Math.random().toString(36).substr(2, 9) + '@unjobless.local';
-        const res = await fetch('/auth/signup', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({email: anonymousEmail, password: 'anonymous', role: ''})
-        });
-        if (res.ok) {
-            const data = await res.json();
-            localStorage.setItem('auth_token', data.token);
-            return data.token;
-        }
-        return null;
-    } catch {
-        return null;
-    }
 }
 
 function updateProgressUI() {
@@ -202,7 +167,6 @@ function applySessionState(data) {
     if (typeof data.questions_answered === 'number') questionsAnswered = data.questions_answered;
     if (typeof data.session_score === 'number') sessionScore = data.session_score;
     if (typeof data.session_completed === 'boolean') sessionCompleted = data.session_completed;
-    currentQuestionSource = data.question_source_label || data.question_source || currentQuestionSource;
     updateProgressUI();
 }
 
@@ -227,6 +191,14 @@ function resetActionButtons() {
         nextBtn.textContent = 'NEXT QUESTION ->';
         nextBtn.onclick = nextQuestion;
     }
+    const modelBtn = el('model-answer-btn');
+    if (modelBtn) {
+        modelBtn.classList.add('hidden');
+        modelBtn.disabled = false;
+        modelBtn.textContent = 'SHOW MODEL ANSWER';
+    }
+    const modelBox = el('model-answer-box');
+    if (modelBox) modelBox.classList.add('hidden');
     if (answer) answer.disabled = false;
 }
 
@@ -329,6 +301,53 @@ function applyCorrection() {
     closeCorrection();
 }
 
+function renderRecap(summary) {
+    const recapBox = el('recap-box');
+    const recapList = el('recap-list');
+    if (!recapBox || !recapList) return;
+    const questions = Array.isArray(summary?.questions) ? summary.questions : [];
+    recapList.replaceChildren();
+    questions.forEach((q, i) => {
+        const item = document.createElement('div');
+        item.className = 'recap-item';
+
+        const head = document.createElement('div');
+        head.className = 'recap-head';
+
+        const qLabel = document.createElement('span');
+        qLabel.className = 'recap-qnum';
+        qLabel.textContent = 'Q' + (i + 1);
+
+        const topic = document.createElement('span');
+        topic.className = 'recap-topic';
+        topic.textContent = (q.topic || 'GENERAL').toUpperCase();
+
+        const pts = document.createElement('span');
+        const skipped = !!q.skipped;
+        pts.className = 'recap-pts ' + (skipped ? 'skipped' : (q.points === 3 ? 'good' : (q.points === 0 ? 'bad' : 'mid')));
+        pts.textContent = skipped ? 'SKIPPED' : (q.points + '/3 PTS');
+
+        head.appendChild(qLabel);
+        head.appendChild(topic);
+        head.appendChild(pts);
+        item.appendChild(head);
+
+        const qText = document.createElement('p');
+        qText.className = 'recap-qtext';
+        qText.textContent = q.question;
+        item.appendChild(qText);
+
+        if (q.feedback) {
+            const fb = document.createElement('p');
+            fb.className = 'recap-feedback';
+            fb.textContent = q.feedback;
+            item.appendChild(fb);
+        }
+        recapList.appendChild(item);
+    });
+    recapBox.classList.remove('hidden');
+}
+
 function showCompletionState(summary) {
     sessionCompleted = true;
     stopTimer();
@@ -386,6 +405,7 @@ function showCompletionState(summary) {
         };
         nextBtn.style.display = 'block';
     }
+    renderRecap(summary);
 }
 
 async function ensureSession() {
@@ -416,10 +436,10 @@ async function loadQuestion() {
     try {
         await ensureSession();
         const res = await fetchJSON('/session/question', {
-            headers: {'Authorisation': 'Bearer ' + sessionToken}
+            headers: authHeaders(sessionToken)
         });
         const data = await res.json();
-        legacyRetries = 0;
+        questionLoadRetries = 0;
         sessionCompleted = false;
         applySessionState(data);
         renderQuestion(data);
@@ -434,8 +454,8 @@ async function loadQuestion() {
             sessionToken = null;
             clearSessionStorage();
         }
-        legacyRetries += 1;
-        if (legacyRetries >= 3) {
+        questionLoadRetries += 1;
+        if (questionLoadRetries >= 3) {
             showQuestionRetry();
             return;
         }
@@ -460,8 +480,10 @@ async function submitAnswer() {
     isSubmitting = true;
     stopTimer();
     submitAbortControl = new AbortController();
+    submitTimeoutId = setTimeout(() => submitAbortControl.abort(), 45000);
 
     const btn = el('submit-btn');
+    const skipBtn = el('skip-btn');
     const feedbackBox = el('feedback-box');
     const feedbackText = el('feedback-text');
     const breakdownText = el('feedback-breakdown');
@@ -472,12 +494,13 @@ async function submitAnswer() {
 
     if (btn) {
         btn.disabled = true;
-        btn.textContent = '...gradin ts...';
+        btn.textContent = '...grading your answer...';
     }
+    if (skipBtn) skipBtn.disabled = true;
     if (feedbackBox) feedbackBox.classList.remove('hidden');
     if (feedbackText) {
         feedbackText.classList.add('loading');
-        feedbackText.textContent = 'gradin ts...';
+        feedbackText.textContent = 'AI THINKING... THIS CAN TAKE UP TO ~30 SECONDS.';
     }
     if (breakdownText) breakdownText.textContent = '';
     if (scoreDisplay) scoreDisplay.textContent = '';
@@ -495,11 +518,7 @@ async function submitAnswer() {
         });
         const data = await res.json();
         if (data.session_completed) {
-            showCompletionState({
-                session_score: data.session_score,
-                questions_answered: data.questions_answered,
-                session_length: data.session_length
-            });
+            showCompletionState(data);
             isSubmitting = false;
             submitAbortControl = null;
             return;
@@ -513,18 +532,20 @@ async function submitAnswer() {
         if (scoreDisplay) scoreDisplay.textContent = `${data.points}/${data.max_points} PTS`;
         if (ratingLabel) ratingLabel.textContent = data.ai_used ? 'AI GRADE' : 'RULE GRADE';
 
-        currentQuestionNumber = data.question_number || currentQuestionNumber;
-        questionsAnswered = typeof data.questions_answered === 'number' ? data.questions_answered : questionsAnswered + 1;
-        sessionScore = typeof data.session_score === 'number' ? data.session_score : sessionScore + (data.points || 0);
-        sessionLength = data.session_length || sessionLength;
-        updateProgressUI();
+        applySessionState(data);
 
         if (nextBtn) nextBtn.style.display = 'block';
         if (improveBtn) improveBtn.classList.remove('hidden');
     } catch (err) {
         if (err.name === 'AbortError') {
-            isSubmitting = false;
-            submitAbortControl = null;
+            if (feedbackText) {
+                feedbackText.classList.remove('loading');
+                feedbackText.textContent = 'Grading timed out. The AI took too long. Hit SUBMIT again to retry — your answer is safe.';
+            }
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = ' SUBMIT YOUR ANSWER';
+            }
             return;
         }
         if (err.status === 409) {
@@ -547,9 +568,27 @@ async function submitAnswer() {
             btn.textContent = ' SUBMIT YOUR ANSWER';
         }
     } finally {
+        clearTimeout(submitTimeoutId);
+        submitTimeoutId = null;
         isSubmitting = false;
         submitAbortControl = null;
+        const skipBtn = el('skip-btn');
+        if (skipBtn) skipBtn.disabled = false;
     }
+}
+
+function resetAnswerArea() {
+    const answer = el('user-answer');
+    if (answer) {
+        answer.value = '';
+        answer.disabled = false;
+    }
+    const wordCount = el('word-count');
+    if (wordCount) wordCount.textContent = '0';
+    const wordCountLabel = el('word-count-label');
+    if (wordCountLabel) wordCountLabel.className = '';
+    const feedbackBox = el('feedback-box');
+    if (feedbackBox) feedbackBox.classList.add('hidden');
 }
 
 async function nextQuestion() {
@@ -557,67 +596,39 @@ async function nextQuestion() {
         location.href = 'stats.html';
         return;
     }
+    clearTimeout(submitTimeoutId);
+    submitTimeoutId = null;
     if (submitAbortControl) {
         submitAbortControl.abort();
         submitAbortControl = null;
     }
     isSubmitting = false;
-
-    const answer = el('user-answer');
-    if (answer) {
-        answer.value = '';
-        answer.disabled = false;
-    }
-    const wordCount = el('word-count');
-    if (wordCount) wordCount.textContent = '0';
-    const wordCountLabel = el('word-count-label');
-    if (wordCountLabel) wordCountLabel.className = '';
-
-    const feedbackBox = el('feedback-box');
-    if (feedbackBox) feedbackBox.classList.add('hidden');
+    resetAnswerArea();
     await loadQuestion();
 }
 
 async function skipQuestion() {
     if (sessionCompleted) return;
     stopTimer();
+    clearTimeout(submitTimeoutId);
+    submitTimeoutId = null;
     if (submitAbortControl) {
         submitAbortControl.abort();
         submitAbortControl = null;
     }
     isSubmitting = false;
-
-    const answer = el('user-answer');
-    if (answer) {
-        answer.value = '';
-        answer.disabled = false;
-    }
-    const wordCount = el('word-count');
-    if (wordCount) wordCount.textContent = '0';
-    const wordCountLabel = el('word-count-label');
-    if (wordCountLabel) wordCountLabel.className = '';
-
-    const feedbackBox = el('feedback-box');
-    if (feedbackBox) feedbackBox.classList.add('hidden');
+    resetAnswerArea();
 
     try {
         await ensureSession();
         const res = await fetchJSON('/session/skip', {
             method: 'POST',
-            headers: {'Authorisation': 'Bearer ' + sessionToken}
+            headers: authHeaders(sessionToken)
         });
         const data = await res.json();
-        currentQuestionNumber = data.question_number || currentQuestionNumber;
-        questionsAnswered = typeof data.questions_answered === 'number' ? data.questions_answered : questionsAnswered + 1;
-        sessionScore = typeof data.session_score === 'number' ? data.session_score : sessionScore;
-        sessionLength = data.session_length || sessionLength;
-        updateProgressUI();
+        applySessionState(data);
         if (data.session_completed) {
-            showCompletionState({
-                session_score: data.session_score,
-                questions_answered: data.questions_answered,
-                session_length: data.session_length
-            });
+            showCompletionState(data);
             return;
         }
     } catch (err) {
@@ -634,6 +645,35 @@ async function handleTime() {
         await submitAnswer();
     } else {
         await skipQuestion();
+    }
+}
+
+async function showModelAnswer() {
+    const btn = el('model-answer-btn');
+    const box = el('model-answer-box');
+    const text = el('model-answer-text');
+    if (!btn || !box || !text || btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = '...generating...';
+    try {
+        await ensureSession();
+        const res = await fetchJSON('/session/model-answer', {
+            method: 'POST',
+            headers: authHeaders(sessionToken)
+        });
+        const data = await res.json();
+        text.textContent = data.model_answer || '';
+        box.classList.remove('hidden');
+        btn.classList.add('hidden');
+    } catch (err) {
+        if (err.status === 401 || err.status === 403) {
+            sessionToken = null;
+            clearSessionStorage();
+        }
+        alert('Model answer unavailable right now.');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'SHOW MODEL ANSWER';
     }
 }
 
@@ -734,6 +774,7 @@ async function init() {
 
 window.addEventListener('beforeunload', () => {
     stopTimer();
+    clearTimeout(submitTimeoutId);
     if (submitAbortControl) submitAbortControl.abort();
 });
 
