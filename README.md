@@ -7,7 +7,6 @@ ArbeitHelp is a free, open-source web app that helps you practice for job interv
 <p align="center">
   <img src="image/README/1787221004883.png" alt="ArbeitHelp home screen" width="700">
 </p>
----
 
 ## Features
 
