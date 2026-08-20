@@ -7,6 +7,7 @@ ArbeitHelp is a free, open-source web app that helps you practice for job interv
 <p align="center">
   <img src="image/README/1787221004883.png" alt="ArbeitHelp home screen" width="700">
 </p>
+---
 
 ## Features
 
@@ -25,8 +26,7 @@ ArbeitHelp is a free, open-source web app that helps you practice for job interv
 2. **Answer & get graded** — the AI grader checks your answer for technical keywords and core concepts and scores it instantly.
 3. **Keep going** — hit next question and repeat, or skip the ones you don't want to answer.
 
-   <p align="center">
-
+<p align="center">
 <img src="image/README/1787221082898.png" alt="How it works" width="700">
 </p>
 
@@ -148,11 +148,9 @@ ArbeitHelp/
 ## Stats & progress dashboard
 
 Once you finish a session, ArbeitHelp shows you a full progress report: total questions answered, average score, current streak, and your best-performing role, alongside charts for score over time, average score by role, average score by difficulty, and your overall score distribution. You can export your complete history as JSON or PDF at any time.
-
-</p align="center">
+<p align="center">
   <img src="image/README/1787221760522.png" alt="Progress overview and score/role charts" width="700">
 </p>
-
 <p align="center">
   <img src="image/README/1787222671406.png" alt="Score by difficulty and score distribution" width="700">
 </p>
