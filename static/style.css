@@ -236,6 +236,213 @@ body::before {
     color: var(--phosphor);
 }
 
+.difficulty-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.difficulty-label {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.55rem;
+    letter-spacing: 0.05em;
+    color: var(--ink-soft);
+}
+
+#difficulty-select {
+    font-family: 'VT323', monospace;
+    font-size: 1.2rem;
+    color: var(--ink);
+    background: #fff;
+    border: 2px solid var(--line);
+    padding: 6px 10px;
+    cursor: pointer;
+}
+
+#difficulty-select:hover,
+#difficulty-select:focus {
+    border-color: var(--phosphor);
+    outline: none;
+}
+
+.jd-details {
+    margin-bottom: 16px;
+    border: 2px solid var(--line);
+    background: #fff;
+}
+
+.jd-details summary {
+    cursor: pointer;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.55rem;
+    letter-spacing: 0.05em;
+    color: var(--ink-soft);
+    padding: 12px 14px;
+    user-select: none;
+}
+
+.jd-details[open] summary {
+    color: var(--phosphor);
+    border-bottom: 2px solid var(--line);
+}
+
+#jd-text {
+    display: block;
+    width: 100%;
+    border: none;
+    background: #fff;
+    font-family: 'VT323', monospace;
+    font-size: 1.15rem;
+    line-height: 1.5;
+    color: var(--ink);
+    padding: 12px 14px;
+    resize: vertical;
+    outline: none;
+}
+
+.select-hint {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    letter-spacing: 1px;
+    color: var(--muted);
+    margin-bottom: 12px;
+}
+
+.role-btn.selected {
+    border-color: var(--phosphor);
+    border-left-width: 4px;
+    background: var(--phosphor-wash);
+}
+
+.role-btn.selected span:last-child {
+    color: var(--ink-soft);
+}
+
+#start-interview-btn {
+    display: block;
+    width: 100%;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 2px;
+    padding: 18px;
+    cursor: pointer;
+    border: 2px solid var(--ink);
+    background: var(--phosphor);
+    color: #fff;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+#start-interview-btn:hover:not(:disabled) {
+    background: var(--paper);
+    border-color: var(--ink);
+    color: var(--phosphor);
+}
+
+#start-interview-btn.no-role {
+    background: var(--line);
+    border-color: var(--line);
+    color: #fff;
+}
+
+#start-interview-btn.no-role:hover {
+    background: var(--muted);
+}
+
+.role-grid.attention {
+    animation: role-pulse 0.6s ease-in-out 2;
+}
+
+@keyframes role-pulse {
+    0%, 100% { box-shadow: none; }
+    50% { box-shadow: 0 0 0 3px var(--amber); }
+}
+
+.status-line {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    margin-top: 8px;
+}
+
+.status-line.hidden { display: none; }
+.status-line.ok { color: var(--phosphor); }
+.status-line.warn { color: var(--amber); }
+
+#ai-mode-note { margin-bottom: 12px; }
+
+.custom-role-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+#custom-role {
+    flex: 1;
+    font-family: 'VT323', monospace;
+    font-size: 1.15rem;
+    color: var(--ink);
+    background: #fff;
+    border: 2px solid var(--line);
+    padding: 6px 10px;
+    outline: none;
+}
+
+#custom-role:focus { border-color: var(--phosphor); }
+
+#analyze-jd-btn {
+    display: block;
+    width: 100%;
+    margin-top: 12px;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.55rem;
+    letter-spacing: 2px;
+    padding: 12px;
+    cursor: pointer;
+    border: 2px solid var(--amber);
+    background: #fff;
+    color: var(--amber);
+    transition: background 0.12s, color 0.12s;
+}
+
+#analyze-jd-btn:hover:not(:disabled) {
+    background: var(--amber);
+    color: #fff;
+}
+
+#analyze-jd-btn:disabled {
+    background: var(--line);
+    border-color: var(--line);
+    color: var(--muted);
+    cursor: wait;
+}
+
+.jd-preview {
+    margin-top: 12px;
+    padding: 12px 14px;
+    border-left: 4px solid var(--phosphor);
+    background: #fff;
+}
+
+.jd-preview.hidden { display: none; }
+
+.jd-preview-head {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.55rem;
+    letter-spacing: 1px;
+    color: var(--ink-soft);
+    margin-bottom: 8px;
+}
+
+.pv-chip {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    border: 1px solid var(--phosphor);
+    color: var(--phosphor);
+    padding: 2px 6px;
+}
+
 .role-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));

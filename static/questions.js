@@ -2,6 +2,8 @@ const TIMER_SECONDS = 120;
 const SESSION_LENGTH_DEFAULT = 5;
 
 let role = null;
+let targetDifficulty = 'mixed';
+let jdText = '';
 let questionsAnswered = 0;
 let currentQuestionNumber = 1;
 let sessionLength = SESSION_LENGTH_DEFAULT;
@@ -139,6 +141,15 @@ function setLoadingQuestion() {
     display.appendChild(cursor);
     setBadge('difficulty-lvl', '', '');
     setBadge('question-source', '', '');
+    const hintBtn = el('hint-btn');
+    if (hintBtn) hintBtn.classList.add('hidden');
+    const hintBox = el('hint-box');
+    if (hintBox) hintBox.classList.add('hidden');
+    const hintEl = el('expectation-hint');
+    if (hintEl) {
+        hintEl.classList.add('hidden');
+        hintEl.textContent = '';
+    }
 }
 
 function showQuestionRetry() {
@@ -205,7 +216,24 @@ function resetActionButtons() {
 function renderQuestion(data) {
     setQuestionDisplay(data.question || '');
     setBadge('difficulty-lvl', (data.difficulty || '').toUpperCase(), data.difficulty || '');
-    setBadge('question-source', data.question_source_label || '', data.question_source === 'ai' ? 'ai' : 'fallback');
+    setBadge('question-source', data.question_source_label || '', data.question_source || 'fallback');
+    const hintEl = el('expectation-hint');
+    if (hintEl) {
+        hintEl.textContent = data.expectation_hint || '';
+        hintEl.classList.toggle('hidden', !data.expectation_hint);
+    }
+    const hintBtn = el('hint-btn');
+    if (hintBtn) {
+        hintBtn.classList.remove('hidden');
+        hintBtn.disabled = false;
+        hintBtn.textContent = 'NEED A HINT';
+    }
+    const hintBox = el('hint-box');
+    if (hintBox) {
+        hintBox.classList.add('hidden');
+        const hintText = el('hint-text');
+        if (hintText) hintText.textContent = '';
+    }
     const feedbackBox = el('feedback-box');
     if (feedbackBox) feedbackBox.classList.add('hidden');
     const feedbackText = el('feedback-text');
@@ -330,6 +358,12 @@ function renderRecap(summary) {
         head.appendChild(qLabel);
         head.appendChild(topic);
         head.appendChild(pts);
+        if (q.hint_used) {
+            const tag = document.createElement('span');
+            tag.className = 'recap-hint';
+            tag.textContent = 'HINT';
+            head.appendChild(tag);
+        }
         item.appendChild(head);
 
         const qText = document.createElement('p');
@@ -345,6 +379,39 @@ function renderRecap(summary) {
         }
         recapList.appendChild(item);
     });
+
+    const oldCoverage = el('jd-coverage');
+    if (oldCoverage) oldCoverage.remove();
+    const jd = summary.jd_coverage;
+    const covered = (jd && Array.isArray(jd.covered)) ? jd.covered : [];
+    const missed = (jd && Array.isArray(jd.missed)) ? jd.missed : [];
+    if (covered.length || missed.length) {
+        const coverage = document.createElement('div');
+        coverage.id = 'jd-coverage';
+        coverage.className = 'jd-coverage';
+        const head = document.createElement('div');
+        head.className = 'jd-coverage-head';
+        head.textContent = 'JD COVERAGE';
+        coverage.appendChild(head);
+        [['covered', 'COVERED'], ['missed', 'MISSED']].forEach(([key, label]) => {
+            const terms = key === 'covered' ? covered : missed;
+            if (!terms.length) return;
+            const rowEl = document.createElement('div');
+            rowEl.className = 'jd-row';
+            const lbl = document.createElement('span');
+            lbl.className = 'jd-label ' + key;
+            lbl.textContent = label;
+            rowEl.appendChild(lbl);
+            terms.forEach(term => {
+                const chip = document.createElement('span');
+                chip.className = 'jd-chip ' + key;
+                chip.textContent = term;
+                rowEl.appendChild(chip);
+            });
+            coverage.appendChild(rowEl);
+        });
+        recapBox.appendChild(coverage);
+    }
     recapBox.classList.remove('hidden');
 }
 
@@ -378,6 +445,10 @@ function showCompletionState(summary) {
     if (skipBtn) skipBtn.disabled = true;
     const improveBtn = el('improve-btn');
     if (improveBtn) improveBtn.classList.add('hidden');
+    const hintBtn = el('hint-btn');
+    if (hintBtn) hintBtn.classList.add('hidden');
+    const hintBox = el('hint-box');
+    if (hintBox) hintBox.classList.add('hidden');
 
     const feedbackBox = el('feedback-box');
     const feedbackText = el('feedback-text');
@@ -417,10 +488,12 @@ async function ensureSession() {
         return sessionToken;
     }
     clearSessionStorage();
+    const body = {role, difficulty: targetDifficulty};
+    if (jdText) body.job_description = jdText;
     const res = await fetchJSON('/session/start', {
         method: 'POST',
         headers: authHeaders(authToken),
-        body: JSON.stringify({role})
+        body: JSON.stringify(body)
     });
     const data = await res.json();
     sessionToken = data.session_token;
@@ -648,8 +721,35 @@ async function handleTime() {
     }
 }
 
-async function showModelAnswer() {
-    const btn = el('model-answer-btn');
+async function getHint() {
+    const btn = el('hint-btn');
+    const box = el('hint-box');
+    const text = el('hint-text');
+    if (!btn || !box || !text || btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = '...thinking...';
+    try {
+        await ensureSession();
+        const res = await fetchJSON('/session/hint', {
+            method: 'POST',
+            headers: authHeaders(sessionToken)
+        });
+        const data = await res.json();
+        text.textContent = data.hint || '';
+        box.classList.remove('hidden');
+        btn.classList.add('hidden');
+    } catch (err) {
+        if (err.status === 401 || err.status === 403) {
+            sessionToken = null;
+            clearSessionStorage();
+        }
+        alert('Hint unavailable right now.');
+        btn.disabled = false;
+        btn.textContent = 'NEED A HINT';
+    }
+}
+
+async function showModelAnswer() {    const btn = el('model-answer-btn');
     const box = el('model-answer-box');
     const text = el('model-answer-text');
     if (!btn || !box || !text || btn.disabled) return;
@@ -729,6 +829,9 @@ async function init() {
     authToken = await initAuth();
     const params = new URLSearchParams(window.location.search);
     role = params.get('role');
+    targetDifficulty = params.get('difficulty') || 'mixed';
+    jdText = sessionStorage.getItem('jd_text') || '';
+    sessionStorage.removeItem('jd_text');
 
     if (!role) {
         alert('Role not given. Please provide a role in the URL query parameters.');

@@ -73,9 +73,35 @@
     <!-- STEP 1: CHOOSE ROLE -->
     <div class="box">
         <div class="box-label">STEP 1 — CHOOSE YOUR ROLE</div>
+        <p class="select-hint">// CLICK A ROLE TO SELECT //</p>
+        <div class="difficulty-row">
+            <label class="difficulty-label" for="difficulty-select">DIFFICULTY:</label>
+            <select id="difficulty-select">
+                <option value="mixed" selected>MIXED (DEFAULT)</option>
+                <option value="easy">EASY</option>
+                <option value="medium">MEDIUM</option>
+                <option value="hard">HARD</option>
+            </select>
+        </div>
+        <details class="jd-details">
+            <summary>PASTE A JOB DESCRIPTION (OPTIONAL)</summary>
+            <textarea id="jd-text" rows="6"
+                placeholder="PASTE THE FULL JOB DESCRIPTION HERE. QUESTIONS WILL BE WEIGHTED TOWARD ITS SKILLS AND FOCUS AREAS."></textarea>
+            <div class="custom-role-row">
+                <label class="difficulty-label" for="custom-role">ROLE NAME:</label>
+                <input id="custom-role" maxlength="80"
+                    placeholder="FOR JOBS OUTSIDE THE TILES, E.G. CHEMICAL ENGINEER">
+            </div>
+            <button id="analyze-jd-btn" type="button" onclick="analyzeJd()">ANALYZE JOB DESCRIPTION</button>
+            <p id="jd-status" class="status-line hidden"></p>
+            <div id="jd-preview" class="hidden"></div>
+        </details>
+        <p id="ai-mode-note" class="status-line warn hidden"></p>
         <div class="role-grid" id="role-grid">
 
         </div>
+        <button id="start-interview-btn" class="no-role" onclick="startInterview()">START INTERVIEW -&gt;</button>
+        <p id="start-msg" class="status-line warn hidden"></p>
     </div>
 
 

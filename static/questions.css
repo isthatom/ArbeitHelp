@@ -143,6 +143,11 @@ body {
     border-color: var(--red);
 }
 
+#question-source.fallback_no_jd_match {
+    color: var(--red);
+    border-color: var(--red);
+}
+
 #difficulty-lvl.complete,
 #question-source.complete {
     color: var(--blue);
@@ -225,6 +230,18 @@ body {
 @keyframes blink {0%,100%{opacity:1}  50%{opacity:0%}}
 
 /* Answer area */
+#expectation-hint {
+    font-family: 'VT323', monospace;
+    font-size: 1.05rem;
+    line-height: 1.4;
+    color: var(--muted);
+    border-left: 3px solid var(--line-strong);
+    padding-left: 10px;
+    margin-top: 6px;
+}
+
+#expectation-hint.hidden { display: none; }
+
 textarea {
     width: 100%;
     background: #fff;
@@ -243,7 +260,7 @@ textarea::placeholder {color: var(--muted);}
 textarea:focus {border-color: var(--phosphor);}
 
 /* Buttons */
-#submit-btn, #skip-btn, #improve-btn, #next-btn {
+#submit-btn, #skip-btn, #improve-btn, #hint-btn, #next-btn {
     width: 100%;
     font-family: 'Press Start 2P', monospace;
     font-size: 0.6rem;
@@ -310,6 +327,45 @@ textarea:focus {border-color: var(--phosphor);}
 }
 
 #improve-btn.hidden { display: none; }
+
+#hint-btn {
+    border: 2px solid var(--amber);
+    background: #fff;
+    color: var(--amber);
+    margin-bottom: 14px;
+}
+
+#hint-btn:hover:not(:disabled) {
+    background: var(--amber);
+    color: #fff;
+}
+
+#hint-btn:disabled {
+    background: var(--line);
+    border-color: var(--line);
+    color: var(--muted);
+    cursor: not-allowed;
+}
+
+#hint-btn.hidden { display: none; }
+
+/* Hint panel */
+#hint-box {
+    width: 100%;
+    margin-bottom: 14px;
+    padding: 12px 16px;
+    border-left: 4px solid var(--amber);
+    background: #fff;
+}
+
+#hint-box.hidden { display: none; }
+
+#hint-text {
+    font-family: 'VT323', monospace;
+    font-size: 1.2rem;
+    line-height: 1.5;
+    color: var(--ink-soft);
+}
 
 /* Feedback */
 #feedback-box {
@@ -480,6 +536,57 @@ textarea:focus {border-color: var(--phosphor);}
 .recap-pts.mid { color: var(--amber); }
 .recap-pts.bad { color: var(--red); }
 .recap-pts.skipped { color: var(--muted); }
+
+.recap-hint {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.5rem;
+    white-space: nowrap;
+    color: var(--amber);
+    border: 1px solid var(--amber);
+    padding: 2px 4px;
+}
+
+.jd-coverage {
+    margin-top: 14px;
+    border-top: 2px solid var(--line);
+    padding-top: 12px;
+}
+
+.jd-coverage-head {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.55rem;
+    letter-spacing: 1px;
+    color: var(--ink-soft);
+    margin-bottom: 10px;
+}
+
+.jd-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.jd-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 1px;
+    margin-right: 4px;
+}
+
+.jd-label.covered { color: var(--phosphor); }
+.jd-label.missed { color: var(--muted); }
+
+.jd-chip {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    border: 1px solid;
+    padding: 2px 6px;
+}
+
+.jd-chip.covered { border-color: var(--phosphor); color: var(--phosphor); }
+.jd-chip.missed { border-color: var(--line); color: var(--muted); }
 
 .recap-qtext {
     font-size: 1.1rem;

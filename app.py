@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 import random
 import re
@@ -7,17 +8,24 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
+logger = logging.getLogger(__name__)
+
 import jwt
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from ai_teacher import ai_correct, ai_generate_question, ai_grade, ai_model_answer
+from ai_teacher import ai_correct, ai_extract_jd, ai_generate_question, ai_grade, ai_hint, ai_model_answer
 from config import (
     AI_ENABLED,
     AI_MODEL,
+    CONSTRAINT_SIGNALS,
     DB_PATH,
+    EASY_MAX_WORDS,
+    JD_MAX_CHARS,
+    MEDIUM_MAX_WORDS,
     QUESTION_FILE,
     QUESTION_SOURCE_AI,
     QUESTION_SOURCE_FALLBACK,
+    QUESTION_SOURCE_FALLBACK_NO_JD,
     SECRET_FILE,
     SESSION_LENGTH,
     STATIC_DIR,
@@ -107,12 +115,33 @@ def _migrate_db():
             "question_source": "TEXT NOT NULL DEFAULT 'fallback'",
             "question_topic": "TEXT",
             "question_difficulty": "TEXT",
+            "question_style": "TEXT",
             "generation_error": "TEXT",
             "model_answer": "TEXT",
+            "hint": "TEXT",
+            "hint_used": "INTEGER NOT NULL DEFAULT 0",
         }
         for column_name, ddl in columns_to_add.items():
             if column_name not in existing_columns:
                 conn.execute(f"ALTER TABLE attempts ADD COLUMN {column_name} {ddl}")
+
+        # Storing the raw JD text (capped to JD_MAX_CHARS) rather than a hash:
+        # the generator needs the structured signals each session, and future
+        # re-extraction or debugging needs the source text. Trade-off: the
+        # user-pasted JD is kept in plaintext next to answers; a hash would be
+        # safer privacy-wise but could not power JD-matched generation.
+        session_columns_to_add = {
+            "target_difficulty": "TEXT NOT NULL DEFAULT 'mixed'",
+            "jd_text": "TEXT",
+            "jd_extracted": "TEXT",
+        }
+        session_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(sessions)").fetchall()
+        }
+        for column_name, ddl in session_columns_to_add.items():
+            if column_name not in session_columns:
+                conn.execute(f"ALTER TABLE sessions ADD COLUMN {column_name} {ddl}")
 
 
 _migrate_db()
@@ -131,7 +160,12 @@ def _hash_pw(pw):
 
 
 def _make_token(user_id):
-    payload = {"user_id": user_id, "iat": _utcnow(), "exp": _utcnow() + timedelta(hours=TOKEN_EXPIRY_HOURS)}
+    payload = {
+        "user_id": user_id,
+        "iat": _utcnow(),
+        "exp": _utcnow() + timedelta(hours=TOKEN_EXPIRY_HOURS),
+        "jti": os.urandom(8).hex(),
+    }
     return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
 
@@ -169,6 +203,22 @@ def _check_user():
     if not user_id:
         return None, (jsonify({"error": "not logged in"}), 401)
     return user_id, None
+
+
+def _sanitize_custom_role(raw):
+    return re.sub(r"\s+", " ", str(raw or "")).strip()[:80]
+
+
+def _resolve_role(raw):
+    role = _sanitize_custom_role(raw)
+    for known in QUESTIONS:
+        if known.lower() == role.lower():
+            return known
+    return role
+
+
+def _is_known_role(role):
+    return role in QUESTIONS
 
 
 def _get_user_record(email):
@@ -229,7 +279,30 @@ def _session_progress(session_id):
 def _question_source_label(source):
     if source == QUESTION_SOURCE_AI:
         return "AI-generated"
+    if source == QUESTION_SOURCE_FALLBACK_NO_JD:
+        return "Fallback bank (JD not matched)"
     return "Fallback question bank"
+
+
+_plausibility_rejects: dict[str, int] = {"easy": 0, "medium": 0, "hard": 0}
+
+
+def _difficulty_plausible(question: str, difficulty: str) -> tuple[bool, str]:
+    wc = len(question.split())
+    qmarks = question.count("?")
+    lower = question.lower()
+    signal_hits = sum(1 for s in CONSTRAINT_SIGNALS if s in lower)
+    if qmarks > 1:
+        return False, f"compound-ask qmarks={qmarks}"
+    if difficulty == "easy":
+        if wc > EASY_MAX_WORDS:
+            return False, f"easy too long wc={wc}"
+        if signal_hits >= 2:
+            return False, f"easy stacked constraints hits={signal_hits}"
+    elif difficulty == "medium":
+        if wc > MEDIUM_MAX_WORDS:
+            return False, f"medium too long wc={wc}"
+    return True, ""
 
 
 def _generation_context(attempts):
@@ -244,6 +317,7 @@ def _generation_context(attempts):
             "question_source": attempt["question_source"],
             "topic": attempt["question_topic"],
             "difficulty": attempt["question_difficulty"],
+            "question_style": attempt["question_style"],
             "skipped": bool(attempt["skipped"]),
         }
         for attempt in attempts
@@ -261,21 +335,40 @@ def _validate_generated_question(candidate, used_questions):
         return None
     if normalized in used_questions:
         return None
+    question_style = str(candidate.get("question_style", "")).strip().lower()
+    if question_style not in {"scenario", "conceptual"}:
+        question_style = "conceptual"
+    ok, why = _difficulty_plausible(question, difficulty)
+    if not ok:
+        _plausibility_rejects[difficulty] = _plausibility_rejects.get(difficulty, 0) + 1
+        logger.debug("rejecting mislabeled question difficulty=%s reason=%s text=%r", difficulty, why, question[:160])
+        return None
     return {
         "question": question,
         "topic": topic,
         "difficulty": difficulty,
+        "question_style": question_style,
     }
 
 
-def _fallback_question(role, used_questions):
-    pool = _questions_for_role(role)
-    available = [q for q in pool if _normalize_text(q["q"]) not in used_questions]
-    if not available:
-        available = pool
-    if not available:
-        return None
-    chosen = random.choice(available)
+def _fallback_question(role, used_questions, target_difficulty="mixed"):
+    full_pool = _questions_for_role(role)
+    pools = []
+    if target_difficulty != "mixed":
+        matched = [q for q in full_pool if _difficulty(q.get("ideal_length", 80)) == target_difficulty]
+        if matched:
+            pools.append(matched)
+    pools.append(full_pool)
+    chosen = None
+    for pool in pools:
+        available = [q for q in pool if _normalize_text(q["q"]) not in used_questions]
+        if available:
+            chosen = random.choice(available)
+            break
+    if chosen is None:
+        if not full_pool:
+            return None
+        chosen = random.choice(full_pool)
     return {
         "question": chosen["q"],
         "topic": chosen.get("topic") or chosen.get("concepts", ["general"])[0],
@@ -291,8 +384,8 @@ def _store_question_attempt(session, question_payload, generation_error=None):
             """
             INSERT INTO attempts (
                 session_id, user_email, role, question_text, question_index, question_source,
-                question_topic, question_difficulty, generation_error, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                question_topic, question_difficulty, question_style, generation_error, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session["id"],
@@ -303,13 +396,14 @@ def _store_question_attempt(session, question_payload, generation_error=None):
                 question_payload.get("source", QUESTION_SOURCE_AI),
                 question_payload.get("topic"),
                 question_payload.get("difficulty"),
+                question_payload.get("question_style"),
                 generation_error,
                 _iso_now(),
             ),
         )
 
 
-def _question_response(session, question_payload, source, session_state, resume=False):
+def _question_response(session, question_payload, source, session_state, resume=False, expectation_hint=""):
     payload = {
         "question": question_payload["question"],
         "role": session["role"],
@@ -321,6 +415,7 @@ def _question_response(session, question_payload, source, session_state, resume=
         "session_score": session_state["session_score"],
         "question_source": source,
         "question_source_label": _question_source_label(source),
+        "expectation_hint": expectation_hint,
         "session_completed": session_state["session_completed"],
     }
     if resume:
@@ -339,21 +434,27 @@ def _current_attempt(session_id, question_index):
 def _next_question(session):
     index = int(session["current_q_index"])
     if index >= SESSION_LENGTH:
-        return None, None
+        return None, "exhausted"
 
+    target_difficulty = session["target_difficulty"] or "mixed"
     attempts = _session_attempts(session["id"])
 
     used_questions = {_normalize_text(a["question_text"]) for a in attempts}
-    context = _generation_context(attempts)
+    context = {
+        "prior_questions": _generation_context(attempts),
+        "used_questions": [a["question_text"] for a in attempts],
+        "used_topics": [a["question_topic"] for a in attempts if a["question_topic"]],
+        "used_difficulties": [a["question_difficulty"] for a in attempts if a["question_difficulty"]],
+    }
+    if target_difficulty != "mixed":
+        context["target_difficulty"] = target_difficulty
+    jd_signals = _parse_jd_signals(session)
+    if jd_signals:
+        context["job_description_signals"] = jd_signals
     generated = ai_generate_question(
         session["role"],
         index + 1,
-        {
-            "prior_questions": context,
-            "used_questions": [a["question_text"] for a in attempts],
-            "used_topics": [a["question_topic"] for a in attempts if a["question_topic"]],
-            "used_difficulties": [a["question_difficulty"] for a in attempts if a["question_difficulty"]],
-        },
+        context,
         SESSION_LENGTH,
     )
     validated = _validate_generated_question(generated or {}, used_questions)
@@ -362,13 +463,18 @@ def _next_question(session):
             "question": validated["question"],
             "topic": validated["topic"],
             "difficulty": validated["difficulty"],
+            "question_style": validated.get("question_style"),
             "source": QUESTION_SOURCE_AI,
-        }, index
+        }, None
 
-    fallback = _fallback_question(session["role"], used_questions)
-    if not fallback:
-        return None, None
-    return fallback, index
+    if _is_known_role(session["role"]):
+        fallback = _fallback_question(session["role"], used_questions, target_difficulty)
+        if fallback:
+            return fallback, None
+        return None, "exhausted"
+    # custom roles have no bank: generation failure must surface as retryable,
+    # never silently end the interview
+    return None, "unavailable"
 
 
 def _difficulty(ideal_length):
@@ -377,6 +483,78 @@ def _difficulty(ideal_length):
     if ideal_length <= 100:
         return "medium"
     return "hard"
+
+
+def _meta_for_question(role, question_text):
+    return next((q for q in _questions_for_role(role) if q["q"] == question_text), {})
+
+
+def _session_has_jd(session):
+    return bool(session["jd_text"]) if "jd_text" in session.keys() else False
+
+
+def _parse_jd_signals(session):
+    raw = session["jd_extracted"] if "jd_extracted" in session.keys() else None
+    if not raw:
+        return None
+    try:
+        signals = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(signals, dict):
+        return None
+    if not (signals.get("skills") or signals.get("tools") or signals.get("focus_areas") or signals.get("seniority")):
+        return None
+    return signals
+
+
+def _jd_terms(signals):
+    terms = []
+    for key in ("skills", "tools", "focus_areas"):
+        for term in signals.get(key) or []:
+            text = str(term).strip().lower()
+            if text and text not in terms:
+                terms.append(text)
+    return terms
+
+
+def _jd_coverage(signals, attempts):
+    if not signals:
+        return None
+    haystack = " ".join((a["answer"] or "") for a in attempts if not a["skipped"]).lower()
+    covered, missed = [], []
+    for term in _jd_terms(signals):
+        (covered if term in haystack else missed).append(term)
+    return {"covered": covered, "missed": missed}
+
+
+def _expectation_hint(meta):
+    style = str(meta.get("question_style") or "").strip().lower()
+    concepts = [str(c).strip() for c in (meta.get("concepts") or []) if c]
+    keywords = [str(k).strip() for k in (meta.get("keywords") or []) if k]
+    topic = str(meta.get("topic") or "").strip()
+
+    clauses = []
+    if style == "scenario":
+        clauses.append("walk through a concrete on-the-job situation")
+        clauses.append("explain the trade-offs behind your decision")
+    else:
+        if concepts:
+            clauses.append("explain " + ", ".join(concepts[:3]))
+        if keywords:
+            clauses.append("cover " + ", ".join(keywords[:3]))
+        if not concepts and not keywords:
+            clauses.append(f"explain {topic}" if topic else "define the concept clearly")
+    clauses.append("include a concrete example")
+
+    hint = "Expect to: " + ", ".join(clauses)
+    try:
+        ideal_length = int(meta.get("ideal_length") or 0)
+    except (TypeError, ValueError):
+        ideal_length = 0
+    if ideal_length > 0:
+        hint += f" (~{ideal_length} words)"
+    return hint + "."
 
 
 def _finalize_session(session_id):
@@ -421,6 +599,7 @@ def _session_summary(session_id):
         "session_score": total_points,
         "session_length": SESSION_LENGTH,
         "total_points": total_points,
+        "jd_coverage": _jd_coverage(_parse_jd_signals(session) if session else None, attempts),
         "questions": [
             {
                 "question": a["question_text"],
@@ -430,6 +609,7 @@ def _session_summary(session_id):
                 "breakdown": a["breakdown"],
                 "grader": a["grader"],
                 "ai_used": bool(a["ai_used"]),
+                "hint_used": bool(a["hint_used"]),
                 "skipped": bool(a["skipped"]),
                 "question_source": a["question_source"],
                 "question_source_label": _question_source_label(a["question_source"]),
@@ -490,25 +670,70 @@ def me():
     return jsonify({"email": user_id, "role": user["role"] if user else ""})
 
 
+@app.route("/jd/preview", methods=["POST"])
+def jd_preview():
+    user_id, err = _check_user()
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    jd_text = str(data.get("job_description") or "").strip()[:JD_MAX_CHARS]
+    if not jd_text:
+        return jsonify({"error": "job_description required"}), 400
+    result = ai_extract_jd(jd_text)
+    signals = {k: result[k] for k in ("skills", "tools", "seniority", "focus_areas")}
+    return jsonify({
+        "signals": signals,
+        "ai_used": bool(result.get("ai_used")),
+        "fallback_reason": result.get("fallback_reason"),
+    })
+
+
 @app.route("/session/start", methods=["POST"])
 def start_session():
     user_id, err = _check_user()
     if err:
         return err
     data = request.get_json(silent=True) or {}
-    role = data.get("role", "").strip()
-    if role not in QUESTIONS:
+    role = _resolve_role(data.get("role", ""))
+    if not role:
         return jsonify({"error": "invalid role"}), 400
+    difficulty = str(data.get("difficulty") or "mixed").strip().lower() or "mixed"
+    if difficulty not in {"easy", "medium", "hard", "mixed"}:
+        return jsonify({"error": "invalid difficulty"}), 400
+    jd_text = str(data.get("job_description") or "").strip()[:JD_MAX_CHARS]
+
+    known_role = _is_known_role(role)
+    if not known_role:
+        # custom roles have no question bank: they live entirely on AI
+        # generation seeded by the pasted job description
+        if not jd_text:
+            return jsonify({"error": "custom roles require a job description"}), 400
+        if not AI_ENABLED or not os.getenv("GROQ_API_KEY"):
+            return jsonify({"error": "custom roles require AI to be enabled"}), 400
+
+    jd_extracted_json = None
+    jd_active = False
+    if jd_text:
+        extraction = ai_extract_jd(jd_text)
+        signals = {k: extraction[k] for k in ("skills", "tools", "seniority", "focus_areas")}
+        # store the result even when it is the empty structure: it records that
+        # extraction ran for this JD and yielded nothing usable
+        jd_extracted_json = json.dumps(signals, ensure_ascii=False)
+        jd_active = bool(any(signals.values()))
+        if not known_role and not jd_active:
+            return jsonify({"error": "could not extract signals from job description"}), 400
     token = _make_token(user_id)
     with _db() as conn:
         conn.execute(
-            "INSERT INTO sessions (id, user_email, role, started_at, current_q_index, skipped_count, finalized) VALUES (?, ?, ?, ?, 0, 0, 0)",
-            (token, user_id, role, _iso_now()),
+            "INSERT INTO sessions (id, user_email, role, started_at, current_q_index, skipped_count, finalized, target_difficulty, jd_text, jd_extracted) VALUES (?, ?, ?, ?, 0, 0, 0, ?, ?, ?)",
+            (token, user_id, role, _iso_now(), difficulty, jd_text or None, jd_extracted_json),
         )
     return jsonify(
         {
             "session_token": token,
             "role": role,
+            "target_difficulty": difficulty,
+            "job_description_active": jd_active,
             "session_length": SESSION_LENGTH,
             "current_question_number": 1,
             "questions_answered": 0,
@@ -528,6 +753,9 @@ def session_question():
     session_state = _session_state(session, _session_attempts(session["id"]))
     existing = _current_attempt(session["id"], int(session["current_q_index"]))
     if existing:
+        hint_meta = dict(_meta_for_question(session["role"], existing["question_text"]))
+        hint_meta["question_style"] = existing["question_style"]
+        hint_meta["topic"] = existing["question_topic"] or hint_meta.get("topic")
         return jsonify(
             _question_response(
                 session,
@@ -539,19 +767,30 @@ def session_question():
                 existing["question_source"],
                 session_state,
                 resume=True,
+                expectation_hint=_expectation_hint(hint_meta),
             )
         )
-    chosen, _ = _next_question(session)
-    if not chosen:
+    chosen, gen_error = _next_question(session)
+    if gen_error == "unavailable":
+        return jsonify({"error": "question generation unavailable", "retry": True}), 503
+    if not chosen or gen_error == "exhausted":
         _finalize_session(session["id"])
         return jsonify({"error": "session complete", "completed": True, "summary": _session_summary(session["id"])}), 409
+    if chosen.get("source") == QUESTION_SOURCE_FALLBACK and _session_has_jd(session):
+        # JD was requested but this question came from the bank: stay transparent
+        chosen["source"] = QUESTION_SOURCE_FALLBACK_NO_JD
     _store_question_attempt(session, chosen, chosen.get("generation_error"))
+    if chosen.get("source") in (QUESTION_SOURCE_FALLBACK, QUESTION_SOURCE_FALLBACK_NO_JD):
+        hint_meta = _meta_for_question(session["role"], chosen["question"])
+    else:
+        hint_meta = chosen
     return jsonify(
         _question_response(
             session,
             chosen,
             chosen.get("source", QUESTION_SOURCE_AI),
             session_state,
+            expectation_hint=_expectation_hint(hint_meta),
         )
     )
 
@@ -575,6 +814,7 @@ def _grade_and_store(session, answer, skipped=False, question_text=None):
             "grader": current["grader"] or "rule",
             "ai_used": bool(current["ai_used"]),
             "fallback_reason": current["fallback_reason"],
+            "hint_used": bool(current["hint_used"]) if "hint_used" in current.keys() else False,
             "question_number": int(current["question_index"]) + 1,
             "next_question_number": min(int(current["question_index"]) + 2, SESSION_LENGTH),
             "questions_answered": int(session["current_q_index"]),
@@ -616,6 +856,12 @@ def _grade_and_store(session, answer, skipped=False, question_text=None):
     breakdown = ai_result.get("breakdown", "")
     fallback_reason = ai_result.get("fallback_reason")
 
+    hint_used = bool(current["hint_used"]) if "hint_used" in current.keys() else False
+    hint_capped = False
+    if hint_used and points > 2:
+        points = 2
+        hint_capped = True
+
     with _db() as conn:
         conn.execute(
             """
@@ -646,6 +892,8 @@ def _grade_and_store(session, answer, skipped=False, question_text=None):
         "grader": grader,
         "ai_used": ai_used,
         "fallback_reason": fallback_reason,
+        "hint_used": hint_used,
+        "hint_capped": hint_capped,
         "question_number": int(current["question_index"]) + 1,
         "next_question_number": min(int(current["question_index"]) + 2, SESSION_LENGTH),
         "questions_answered": session_state["questions_answered"],
@@ -705,6 +953,32 @@ def session_model_answer():
         )
     return jsonify({
         "model_answer": result["model_answer"],
+        "cached": False,
+        "ai_used": bool(result.get("ai_used")),
+        "fallback_reason": result.get("fallback_reason"),
+    })
+
+
+@app.route("/session/hint", methods=["POST"])
+def session_hint():
+    session, err = _require_session()
+    if err:
+        return err
+    attempts = _session_attempts(session["id"])
+    current = attempts[-1] if attempts else None
+    if not current or current["skipped"] or current["answer"]:
+        return jsonify({"error": "no active question"}), 400
+    if current["hint"]:
+        return jsonify({"hint": current["hint"], "cached": True, "ai_used": bool(current["ai_used"])})
+    meta = _meta_for_question(session["role"], current["question_text"])
+    result = ai_hint(session["role"], current["question_text"], meta)
+    with _db() as conn:
+        conn.execute(
+            "UPDATE attempts SET hint = ?, hint_used = 1 WHERE id = ?",
+            (result["hint"], current["id"]),
+        )
+    return jsonify({
+        "hint": result["hint"],
         "cached": False,
         "ai_used": bool(result.get("ai_used")),
         "fallback_reason": result.get("fallback_reason"),
@@ -879,7 +1153,13 @@ def stats_summary():
         while current in dates:
             streak += 1
             current = (datetime.fromisoformat(current).date() - timedelta(days=1)).isoformat()
-    return jsonify({"total_questions": len(points), "avg_score": round(sum(points) / len(points), 1) if points else 0.0, "streak": streak, "best_role": _best_role(attempts)})
+    return jsonify({
+        "total_questions": len(points),
+        "avg_score": round(sum(points) / len(points), 1) if points else 0.0,
+        "streak": streak,
+        "best_role": _best_role(attempts),
+        "hints_used": sum(1 for a in attempts if a["hint_used"]),
+    })
 
 
 @app.route("/stats/chart-data")
@@ -889,7 +1169,7 @@ def stats_chart_data():
         return err
     attempts = _answered_attempts(user_id)
     time_series = [
-        {"index": i + 1, "date": a["created_at"][:10], "score": int(a["points"]), "role": a["role"], "question": a["question_text"][:50]}
+        {"index": i + 1, "date": a["created_at"][:10], "score": int(a["points"]), "role": a["role"], "question": a["question_text"][:50], "hint_used": bool(a["hint_used"])}
         for i, a in enumerate(attempts)
     ]
     by_role_avg = {role: round(avg, 2) for role, avg in _role_averages(attempts).items()}
@@ -962,6 +1242,9 @@ def health():
             "model": AI_MODEL if AI_ENABLED else None,
             "prompt_version": "v1.0",
             "question_prompt_version": "v1.0_question_generator",
+            "hint_prompt_version": "v1.0_hint",
+            "jd_prompt_version": "v1.0_jd_parser",
+            "plausibility_rejects": dict(_plausibility_rejects),
             "grader": "ai + rule fallback" if AI_ENABLED else "rule-based",
             "roles": list(QUESTIONS.keys()),
             "total_questions": sum(len(v) for v in QUESTIONS.values()),

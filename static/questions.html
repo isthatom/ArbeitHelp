@@ -56,13 +56,19 @@
                 <span id="word-count">0</span>
             </span>
         </div>
+        <div id="expectation-hint" class="hidden"></div>
         <textarea id="user-answer" rows="7"
             placeholder="TYPE YOUR ANSWER HERE. BE SPECIFIC BY USING EXAMPLES AND MAKE SURE TO EXPLAIN YOUR REASONING.">
         </textarea>
     </div>
 
+    <div id="hint-box" class="hidden">
+        <div id="hint-text"></div>
+    </div>
+
     <button id="submit-btn" onclick="submitAnswer()" aria-label="SUBMIT ANSWER"> SUBMIT YOUR ANSWER</button>
     <button id="skip-btn" onclick="skipQuestion()">SKIP THIS QUESTION</button>
+    <button id="hint-btn" class="hidden" onclick="getHint()">NEED A HINT</button>
     <button id="improve-btn" onclick="improveAnswer()" class="hidden">AI IMPROVE MY ANSWER</button>
 
     <div id="feedback-box" class="hidden">

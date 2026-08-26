@@ -10,6 +10,8 @@ from config import (
     AI_MODEL,
     AI_PROVIDER,
     AI_TIMEOUT,
+    HINT_PROMPT_PATH,
+    JD_PROMPT_PATH,
     PROMPT_PATH,
     QUESTION_PROMPT_PATH,
 )
@@ -32,6 +34,18 @@ def load_question_prompt() -> str:
     if QUESTION_PROMPT_PATH.exists():
         return QUESTION_PROMPT_PATH.read_text(encoding="utf-8").strip()
     return "You generate one interview question at a time. Return only valid JSON."
+
+
+def load_hint_prompt() -> str:
+    if HINT_PROMPT_PATH.exists():
+        return HINT_PROMPT_PATH.read_text(encoding="utf-8").strip()
+    return "You give one short hint for an interview question. Return only valid JSON."
+
+
+def load_jd_prompt() -> str:
+    if JD_PROMPT_PATH.exists():
+        return JD_PROMPT_PATH.read_text(encoding="utf-8").strip()
+    return "You extract structured skills from a job description. Return only valid JSON."
 
 
 def _clean_json(text: str) -> str:
@@ -200,13 +214,19 @@ def _build_question_prompt(role, question_number, session_length, session_contex
             "question": "string",
             "topic": "string",
             "difficulty": "easy|medium|hard",
+            "question_style": "scenario|conceptual",
         },
     }
     return json.dumps(payload, ensure_ascii=False)
 
 
 def ai_generate_question(role, question_number, session_context, session_length=5):
+    global _fail_count, _circuit_open_until
     if not AI_ENABLED or not os.getenv("GROQ_API_KEY") or not _model_supported_or_fail():
+        return None
+
+    if _circuit_open_until > time.time() or _fail_count >= _threshold:
+        _circuit_open_until = time.time() + _cooldown
         return None
 
     try:
@@ -222,14 +242,20 @@ def ai_generate_question(role, question_number, session_context, session_length=
         question = str(result.get("question", "")).strip()
         topic = str(result.get("topic", "")).strip()
         difficulty = str(result.get("difficulty", "")).strip().lower()
+        question_style = str(result.get("question_style", "")).strip().lower()
+        if question_style not in {"scenario", "conceptual"}:
+            question_style = "conceptual"
         if not question or not topic or difficulty not in {"easy", "medium", "hard"}:
             raise ValueError("invalid question generation response")
 
         tokens_in, tokens_out = _extract_usage(resp)
+        _fail_count = 0
+        _circuit_open_until = 0
         return {
             "question": question,
             "topic": topic,
             "difficulty": difficulty,
+            "question_style": question_style,
             "ai_used": True,
             "fallback_reason": None,
             "_meta": {
@@ -241,6 +267,7 @@ def ai_generate_question(role, question_number, session_context, session_length=
             },
         }
     except Exception as exc:
+        _fail_count += 1
         logger.exception("AI question generation failed: %s", exc)
         return None
 
@@ -305,6 +332,151 @@ def ai_model_answer(role, question, meta):
         _fail_count += 1
         logger.exception("AI model answer failed: %s", exc)
         return {"model_answer": _fallback_model_answer(role, question, meta), "ai_used": False, "fallback_reason": "ai_error"}
+
+
+def _fallback_hint(meta):
+    concepts = [str(c).strip() for c in (meta.get("concepts") or []) if c]
+    keywords = [str(k).strip() for k in (meta.get("keywords") or []) if k]
+    if concepts:
+        return f"Consider mentioning: {concepts[0]}."
+    if keywords:
+        return f"Consider mentioning: {keywords[0]}."
+    return "Think of a concrete example from real-world practice."
+
+
+def _build_hint_prompt(role, question, meta):
+    payload = {
+        "role": role,
+        "question": question,
+        "question_metadata": _question_metadata(meta),
+        "output_format": {"hint": "string"},
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def ai_hint(role, question, meta):
+    global _fail_count, _circuit_open_until
+    if not AI_ENABLED or not os.getenv("GROQ_API_KEY") or not _model_supported_or_fail():
+        return {"hint": _fallback_hint(meta), "ai_used": False, "fallback_reason": "ai_unavailable"}
+
+    if _circuit_open_until > time.time() or _fail_count >= _threshold:
+        _circuit_open_until = time.time() + _cooldown
+        return {"hint": _fallback_hint(meta), "ai_used": False, "fallback_reason": "ai_unavailable"}
+
+    try:
+        start = time.time()
+        resp = _invoke_ai(
+            [{"role": "user", "content": _build_hint_prompt(role, question, meta)}],
+            load_hint_prompt(),
+            expected_tokens_out=100,
+        )
+        latency_ms = int((time.time() - start) * 1000)
+        text = _extract_text(resp)
+        result = json.loads(text)
+        hint = str(result.get("hint", "")).strip()
+        if not hint:
+            raise ValueError("invalid hint response")
+
+        tokens_in, tokens_out = _extract_usage(resp)
+        _fail_count = 0
+        _circuit_open_until = 0
+        return {
+            "hint": hint,
+            "ai_used": True,
+            "fallback_reason": None,
+            "_meta": {
+                "provider": AI_PROVIDER,
+                "model": AI_MODEL,
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "latency_ms": latency_ms,
+            },
+        }
+    except Exception as exc:
+        _fail_count += 1
+        logger.exception("AI hint failed: %s", exc)
+        return {"hint": _fallback_hint(meta), "ai_used": False, "fallback_reason": "ai_error"}
+
+
+def _empty_jd():
+    return {"skills": [], "tools": [], "seniority": "", "focus_areas": []}
+
+
+def _jd_string_list(value, cap=12):
+    if not isinstance(value, list):
+        return []
+    out = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        text = item.strip().lower()
+        if text and text not in out:
+            out.append(text)
+        if len(out) >= cap:
+            break
+    return out
+
+
+def _validate_jd(result):
+    seniority = str(result.get("seniority", "")).strip().lower()[:40]
+    return {
+        "skills": _jd_string_list(result.get("skills")),
+        "tools": _jd_string_list(result.get("tools")),
+        "seniority": seniority,
+        "focus_areas": _jd_string_list(result.get("focus_areas")),
+    }
+
+
+def _build_jd_prompt(jd_text):
+    payload = {
+        "job_description": jd_text,
+        "output_format": _empty_jd(),
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def ai_extract_jd(jd_text):
+    global _fail_count, _circuit_open_until
+    if not AI_ENABLED or not os.getenv("GROQ_API_KEY") or not _model_supported_or_fail():
+        return {**_empty_jd(), "ai_used": False, "fallback_reason": "ai_unavailable"}
+
+    if _circuit_open_until > time.time() or _fail_count >= _threshold:
+        _circuit_open_until = time.time() + _cooldown
+        return {**_empty_jd(), "ai_used": False, "fallback_reason": "ai_unavailable"}
+
+    try:
+        start = time.time()
+        resp = _invoke_ai(
+            [{"role": "user", "content": _build_jd_prompt(jd_text)}],
+            load_jd_prompt(),
+            expected_tokens_out=400,
+        )
+        latency_ms = int((time.time() - start) * 1000)
+        text = _extract_text(resp)
+        result = json.loads(text)
+        validated = _validate_jd(result)
+        if not (validated["skills"] or validated["tools"] or validated["focus_areas"] or validated["seniority"]):
+            raise ValueError("empty JD extraction response")
+
+        tokens_in, tokens_out = _extract_usage(resp)
+        _fail_count = 0
+        _circuit_open_until = 0
+        return {
+            **validated,
+            "ai_used": True,
+            "fallback_reason": None,
+            "_meta": {
+                "provider": AI_PROVIDER,
+                "model": AI_MODEL,
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "latency_ms": latency_ms,
+            },
+        }
+    except Exception as exc:
+        _fail_count += 1
+        logger.exception("AI JD extraction failed: %s", exc)
+        return {**_empty_jd(), "ai_used": False, "fallback_reason": "ai_error"}
 
 
 def ai_grade(role, question, answer, meta):
