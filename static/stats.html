@@ -12,7 +12,7 @@
     <body>
         <div class="term-bar" aria-hidden="true">
             <span>ARBEITHELP://stats</span>
-            <span class="term-bar-right">v1.0 // progress</span>
+            <span class="term-bar-right">v1.1 // progress</span>
         </div>
 
         <div id="lock-screen" class="lock-screen hidden">
@@ -25,16 +25,27 @@
         <div id="stats-content" class="hidden">
             <header class="stats-header">
                 <a href="index.html" class="back"><- BACK</a>
-                <h1> PROGRESS </h1>
-                <p id="stats-subtitle">// YOUR INTERVIEW JOURNEY //</p>
+                <h1>ALL-TIME STATS</h1>
+                <p id="stats-subtitle">// YOUR PROGRESS HISTORY — ALL SESSIONS //</p>
             </header>
 
-            <section class="stats-summary">
-                <div class="stat-card"><span id="stat-total-qs">0</span><label>QUESTIONS</label></div>
-                <div class="stat-card"><span id="stat-avg">0.0</span><label>AVG SCORE</label></div>
-                <div class="stat-card"><span id="start-streak">0</span><label>STREAK</label></div>
-                <div class="stat-card"><span id="stat-best-role">-</span><label>BEST ROLE</label></div>
+            <section id="last-session-section" class="hidden last-session-section">
+                <h2>THIS SESSION</h2>
+                <p id="last-session-meta" class="last-session-meta"></p>
+                <div id="last-session-cards" class="stats-summary" style="margin-bottom:16px"></div>
+                <div id="last-session-recap"></div>
+                <p class="stats-scope-note" style="margin-top:12px">↑ This session only (stored on this device). Below is your lifetime history.</p>
             </section>
+
+            <h2 class="stats-divider">ALL-TIME STATS</h2>
+
+            <section class="stats-summary">
+                <div class="stat-card"><span id="stat-total-qs">0</span><label>QUESTIONS (ALL TIME)</label></div>
+                <div class="stat-card"><span id="stat-avg">0.0</span><label>AVG SCORE (ALL TIME)</label></div>
+                <div class="stat-card"><span id="start-streak">0</span><label>STREAK (ALL TIME)</label></div>
+                <div class="stat-card"><span id="stat-best-role">-</span><label>BEST ROLE (ALL TIME)</label></div>
+            </section>
+            <p class="stats-scope-note">All numbers above cover every completed session. For this session only, see its recap screen.</p>
 
             <section class="stats-weak" id="weak-topics">
                 <h3>// WEAKEST TOPICS //</h3>
@@ -66,7 +77,7 @@
             </section>
 
             <div class="footer">
-                <span>ArbeitHelp v1.0</span>
+                <span>ArbeitHelp v1.1</span>
             </div>
         </div>
 

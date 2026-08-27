@@ -17,7 +17,7 @@
 
     <div class="term-bar" aria-hidden="true">
         <span>ARBEITHELP://interview</span>
-        <span class="term-bar-right">v1.0 // session</span>
+        <span class="term-bar-right">v1.1 // session</span>
     </div>
 
     <div class="header">
@@ -68,6 +68,7 @@
 
     <button id="submit-btn" onclick="submitAnswer()" aria-label="SUBMIT ANSWER"> SUBMIT YOUR ANSWER</button>
     <button id="skip-btn" onclick="skipQuestion()">SKIP THIS QUESTION</button>
+    <button id="end-session-btn" class="hidden" onclick="endSession()">END SESSION</button>
     <button id="hint-btn" class="hidden" onclick="getHint()">NEED A HINT</button>
     <button id="improve-btn" onclick="improveAnswer()" class="hidden">AI IMPROVE MY ANSWER</button>
 
@@ -93,9 +94,10 @@
 
     <div id="recap-box" class="hidden">
         <div class="box-label">
-            <span>SESSION RECAP</span>
+            <span>THIS SESSION'S RESULTS</span>
         </div>
         <div id="recap-list"></div>
+        <a id="view-all-stats-btn" href="stats.html" class="hidden secondary-link">View All-Time Stats →</a>
     </div>
 
     <div id="correction-modal" class="hidden">
@@ -119,7 +121,7 @@
     <div class="footer">
         <span>SCORE: <span id="score">0</span>PTS</span>
         <span>ANSWERED: <span id="q-count"></span></span>
-        <span>ArbeitHelp v1.0</span>
+        <span>ArbeitHelp v1.1</span>
     </div>
 </body>
 

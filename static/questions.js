@@ -150,6 +150,8 @@ function setLoadingQuestion() {
         hintEl.classList.add('hidden');
         hintEl.textContent = '';
     }
+    const endBtn = el('end-session-btn');
+    if (endBtn) endBtn.classList.toggle('hidden', sessionCompleted || !sessionToken);
 }
 
 function showQuestionRetry() {
@@ -234,6 +236,8 @@ function renderQuestion(data) {
         const hintText = el('hint-text');
         if (hintText) hintText.textContent = '';
     }
+    const endBtn = el('end-session-btn');
+    if (endBtn) endBtn.classList.toggle('hidden', !!sessionCompleted);
     const feedbackBox = el('feedback-box');
     if (feedbackBox) feedbackBox.classList.add('hidden');
     const feedbackText = el('feedback-text');
@@ -418,6 +422,10 @@ function renderRecap(summary) {
 function showCompletionState(summary) {
     sessionCompleted = true;
     stopTimer();
+    try {
+        localStorage.setItem('last_session_summary', JSON.stringify(summary));
+        localStorage.setItem('last_session_at', new Date().toISOString());
+    } catch {}
     clearSessionStorage();
     sessionToken = null;
 
@@ -430,9 +438,9 @@ function showCompletionState(summary) {
     currentQuestionNumber = completedLength;
     updateProgressUI();
 
-    setQuestionDisplay('INTERVIEW COMPLETE');
+    setQuestionDisplay('INTERVIEW COMPLETE — THIS SESSION');
     setBadge('difficulty-lvl', 'COMPLETE', 'complete');
-    setBadge('question-source', 'SESSION COMPLETE', 'complete');
+    setBadge('question-source', 'THIS SESSION', 'complete');
 
     const answer = el('user-answer');
     if (answer) answer.disabled = true;
@@ -449,6 +457,8 @@ function showCompletionState(summary) {
     if (hintBtn) hintBtn.classList.add('hidden');
     const hintBox = el('hint-box');
     if (hintBox) hintBox.classList.add('hidden');
+    const endBtn2 = el('end-session-btn');
+    if (endBtn2) endBtn2.classList.add('hidden');
 
     const feedbackBox = el('feedback-box');
     const feedbackText = el('feedback-text');
@@ -460,22 +470,21 @@ function showCompletionState(summary) {
     if (feedbackBox) feedbackBox.classList.remove('hidden');
     if (feedbackText) {
         feedbackText.classList.remove('loading');
-        feedbackText.textContent = `Session complete. Total score: ${completedScore}/${completedLength * 3}.`;
+        feedbackText.textContent = `This session: ${completedScore}/${completedLength * 3} pts — ${completedAnswered}/${completedLength} answered.`;
     }
     if (breakdownText) {
-        breakdownText.textContent = `Answered ${completedAnswered}/${completedLength} questions.`;
+        breakdownText.textContent = `Score reflects this session only (not lifetime).`;
     }
     if (scoreDisplay) {
-        scoreDisplay.textContent = `${completedScore}/${completedLength * 3} SESSION PTS`;
+        scoreDisplay.textContent = `${completedScore}/${completedLength * 3} THIS SESSION`;
     }
-    if (ratingLabel) ratingLabel.textContent = 'SESSION COMPLETE';
+    if (ratingLabel) ratingLabel.textContent = "THIS SESSION'S RESULTS";
     if (nextBtn) {
-        nextBtn.textContent = 'VIEW STATS ->';
-        nextBtn.onclick = () => {
-            location.href = 'stats.html';
-        };
-        nextBtn.style.display = 'block';
+        nextBtn.style.display = 'none';
+        nextBtn.onclick = null;
     }
+    const viewAllStats = el('view-all-stats-btn');
+    if (viewAllStats) viewAllStats.classList.remove('hidden');
     renderRecap(summary);
 }
 
@@ -666,7 +675,6 @@ function resetAnswerArea() {
 
 async function nextQuestion() {
     if (sessionCompleted) {
-        location.href = 'stats.html';
         return;
     }
     clearTimeout(submitTimeoutId);
@@ -749,7 +757,38 @@ async function getHint() {
     }
 }
 
-async function showModelAnswer() {    const btn = el('model-answer-btn');
+async function endSession() {
+    if (sessionCompleted) return;
+    if (!confirm("End session early? Your progress so far will be saved and you cannot resume.")) return;
+    const btn = el('end-session-btn');
+    if (btn) btn.disabled = true;
+    try {
+        await ensureSession();
+        const res = await fetchJSON('/session/end', {
+            method: 'POST',
+            headers: authHeaders(sessionToken)
+        });
+        const data = await res.json();
+        showCompletionState(data);
+    } catch (err) {
+        if (err.status === 409) {
+            const data = await err.response.json().catch(() => ({}));
+            if (data.summary) {
+                showCompletionState(data.summary);
+                return;
+            }
+        }
+        if (err.status === 401 || err.status === 403) {
+            sessionToken = null;
+            clearSessionStorage();
+        }
+        alert('Could not end session.');
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function showModelAnswer() {
+    const btn = el('model-answer-btn');
     const box = el('model-answer-box');
     const text = el('model-answer-text');
     if (!btn || !box || !text || btn.disabled) return;

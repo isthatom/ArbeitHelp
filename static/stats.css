@@ -168,6 +168,107 @@ body {
     height: 100% !important;
 }
 
+.stats-scope-note {
+    width: 100%;
+    max-width: 1000px;
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--muted);
+    letter-spacing: 1px;
+    margin: -12px 0 28px;
+}
+
+.last-session-section {
+    width: 100%;
+    max-width: 1000px;
+    background: #fff;
+    border: 2px solid var(--line-strong);
+    border-left: 6px solid var(--phosphor);
+    padding: 20px;
+    margin-bottom: 28px;
+}
+
+.last-session-section.hidden { display: none; }
+
+.last-session-section h2 {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 2px;
+    color: var(--phosphor);
+    margin-bottom: 8px;
+}
+
+.last-session-meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--ink-soft);
+    letter-spacing: 1px;
+    margin-bottom: 16px;
+}
+
+.stats-divider {
+    width: 100%;
+    max-width: 1000px;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 2px;
+    color: var(--ink-soft);
+    text-align: center;
+    margin: 8px 0 20px;
+}
+
+#last-session-recap .recap-item { margin-bottom: 10px; }
+
+/* Reused from questions.css for last-session recap rendering */
+#last-session-recap .recap-item {
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--phosphor);
+    padding: 12px 16px;
+    background: var(--paper);
+}
+#last-session-recap .recap-head {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+}
+#last-session-recap .recap-qnum {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.55rem;
+    color: var(--ink);
+}
+#last-session-recap .recap-topic {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--ink-soft);
+    flex: 1;
+}
+#last-session-recap .recap-pts { font-family: 'Press Start 2P', monospace; font-size: 0.55rem; }
+#last-session-recap .recap-pts.good { color: var(--phosphor); }
+#last-session-recap .recap-pts.mid { color: var(--amber); }
+#last-session-recap .recap-pts.bad { color: var(--red); }
+#last-session-recap .recap-pts.skipped { color: var(--muted); }
+#last-session-recap .recap-hint {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.5rem;
+    color: var(--amber);
+    border: 1px solid var(--amber);
+    padding: 2px 4px;
+}
+#last-session-recap .recap-qtext { font-size: 1.05rem; line-height: 1.4; margin-bottom: 6px; }
+#last-session-recap .recap-feedback { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--ink-soft); }
+#last-session-recap .jd-coverage { margin-top: 12px; border-top: 2px solid var(--line); padding-top: 10px; }
+#last-session-recap .jd-coverage-head { font-family: 'Press Start 2P', monospace; font-size: 0.5rem; color: var(--ink-soft); margin-bottom: 8px; }
+#last-session-recap .jd-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }
+#last-session-recap .jd-label { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; }
+#last-session-recap .jd-label.covered { color: var(--phosphor); }
+#last-session-recap .jd-label.missed { color: var(--muted); }
+#last-session-recap .jd-chip { font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; border: 1px solid; padding: 2px 6px; }
+#last-session-recap .jd-chip.covered { border-color: var(--phosphor); color: var(--phosphor); }
+#last-session-recap .jd-chip.missed { border-color: var(--line); color: var(--muted); }
+
 .stats-action {
     display: flex;
     justify-content: center;

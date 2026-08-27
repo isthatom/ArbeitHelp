@@ -910,6 +910,68 @@ def test_custom_role_generation_failure_is_retryable(client, monkeypatch):
     assert resp.status_code == 200
 
 
+def test_end_session_early(client):
+    token = _signup(client, "endearly@test.local")
+    sess = _start_session(client, token)
+
+    # answer 2 of the 5 questions
+    for i in range(2):
+        resp = client.get("/session/question", headers=_headers(sess))
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        q_text = resp.get_json()["question"]
+        resp = client.post("/session/submit", headers=_headers(sess), json={"answer": ANSWERS[i]})
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        assert resp.get_json()["question"] if "question" in resp.get_json() else True
+
+    # end early
+    resp = client.post("/session/end", headers=_headers(sess))
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    summary = resp.get_json()
+    assert summary["completed"] is True
+    assert summary["questions_answered"] == 2
+    assert summary["session_length"] == 5
+    assert len(summary["questions"]) == 2
+    # ensure scored questions are present
+    for q in summary["questions"]:
+        assert q["points"] is not None
+        assert q["answer"] is not None
+
+    # after ending, question fetch is closed (409)
+    resp = client.get("/session/question", headers=_headers(sess))
+    assert resp.status_code == 409
+    body = resp.get_json()
+    assert body["completed"] is True
+    assert body["summary"]["completed"] is True
+
+    # second end is idempotent 409
+    resp = client.post("/session/end", headers=_headers(sess))
+    assert resp.status_code == 409
+    body = resp.get_json()
+    assert body["completed"] is True
+    assert "summary" in body
+
+
+def test_end_session_does_not_include_pending_question(client):
+    # serve a question but don't answer/skip it, then end — pending row must not appear
+    token = _signup(client, "endpending@test.local")
+    sess = _start_session(client, token)
+
+    resp = client.get("/session/question", headers=_headers(sess))
+    assert resp.status_code == 200
+    resp = client.post("/session/submit", headers=_headers(sess), json={"answer": ANSWERS[0]})
+    assert resp.status_code == 200
+
+    # serve next question and leave it unanswered
+    resp = client.get("/session/question", headers=_headers(sess))
+    assert resp.status_code == 200
+
+    resp = client.post("/session/end", headers=_headers(sess))
+    assert resp.status_code == 200
+    summary = resp.get_json()
+    assert summary["questions_answered"] == 1
+    assert len(summary["questions"]) == 1
+
+
 def test_difficulty_plausibility(client):
     import app as app_module
 
@@ -970,3 +1032,54 @@ def test_fallback_bank_not_validated(client):
     resp = client.get("/session/question", headers=_headers(sess))
     assert resp.status_code == 200
     assert resp.get_json()["question_source"] in ("fallback", "ai", "fallback_no_jd_match")
+
+
+def test_recap_is_session_scoped_not_lifetime(client):
+    # Two sessions for same user — recap must be session-scoped,
+    # stats endpoints are intentionally lifetime-scoped.
+    token = _signup(client, "recap_scope@test.local")
+    headers_user = _headers(token)
+
+    sess1 = _start_session(client, token)
+    h1 = _headers(sess1)
+    resp = client.get("/session/question", headers=h1)
+    assert resp.status_code == 200
+    q1 = resp.get_json()["question"]
+    resp = client.post("/session/submit", headers=h1, json={"answer": ANSWERS[0]})
+    assert resp.status_code == 200
+    resp = client.post("/session/end", headers=h1)
+    assert resp.status_code == 200
+    summary1 = resp.get_json()
+    assert summary1["questions_answered"] == 1
+    assert len(summary1["questions"]) == 1
+    assert summary1["questions"][0]["question"] == q1
+    # shape is _session_summary, not stats shape
+    assert "questions" in summary1 and "session_score" in summary1
+    assert "total_questions" not in summary1
+    assert "avg_score" not in summary1
+
+    sess2 = _start_session(client, token)
+    h2 = _headers(sess2)
+    for i in range(2):
+        resp = client.get("/session/question", headers=h2)
+        assert resp.status_code == 200
+        resp = client.post("/session/submit", headers=h2, json={"answer": ANSWERS[i]})
+        assert resp.status_code == 200
+    resp = client.post("/session/end", headers=h2)
+    summary2 = resp.get_json()
+    assert summary2["questions_answered"] == 2
+    assert len(summary2["questions"]) == 2
+    # first session's recap must not have been mutated / aggregated
+    assert summary1["questions_answered"] == 1
+    assert len(summary1["questions"]) == 1
+
+    # lifetime stats aggregate both sessions
+    resp = client.get("/stats/summary", headers=headers_user)
+    assert resp.status_code == 200
+    stats = resp.get_json()
+    assert stats["total_questions"] == 3
+    assert "hints_used" in stats
+
+    resp = client.get("/stats/chart-data", headers=headers_user)
+    chart = resp.get_json()
+    assert len(chart["time_series"]) == 3

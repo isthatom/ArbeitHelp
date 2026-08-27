@@ -932,6 +932,22 @@ def session_skip():
     return jsonify(result)
 
 
+@app.route("/session/end", methods=["POST"])
+def session_end():
+    session, err = _require_session()
+    if err:
+        return err
+    if session["finalized"]:
+        return jsonify({"error": "session complete", "completed": True, "summary": _session_summary(session["id"])}), 409
+    with _db() as conn:
+        conn.execute(
+            "DELETE FROM attempts WHERE session_id = ? AND question_index = ? AND answer IS NULL AND points IS NULL AND skipped = 0",
+            (session["id"], int(session["current_q_index"])),
+        )
+    _finalize_session(session["id"])
+    return jsonify(_session_summary(session["id"]))
+
+
 @app.route("/session/model-answer", methods=["POST"])
 def session_model_answer():
     session, err = _require_session()

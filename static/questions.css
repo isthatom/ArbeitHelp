@@ -260,7 +260,7 @@ textarea::placeholder {color: var(--muted);}
 textarea:focus {border-color: var(--phosphor);}
 
 /* Buttons */
-#submit-btn, #skip-btn, #improve-btn, #hint-btn, #next-btn {
+#submit-btn, #skip-btn, #end-session-btn, #improve-btn, #hint-btn, #next-btn {
     width: 100%;
     font-family: 'Press Start 2P', monospace;
     font-size: 0.6rem;
@@ -349,6 +349,27 @@ textarea:focus {border-color: var(--phosphor);}
 
 #hint-btn.hidden { display: none; }
 
+#end-session-btn {
+    border: 2px solid var(--line);
+    background: #fff;
+    color: var(--muted);
+    margin-bottom: 14px;
+}
+
+#end-session-btn:hover:not(:disabled) {
+    border-color: var(--red);
+    color: var(--red);
+}
+
+#end-session-btn:disabled {
+    background: var(--paper-wash);
+    color: var(--muted);
+    border-color: var(--line);
+    cursor: not-allowed;
+}
+
+#end-session-btn.hidden { display: none; }
+
 /* Hint panel */
 #hint-box {
     width: 100%;
@@ -421,6 +442,25 @@ textarea:focus {border-color: var(--phosphor);}
     color: var(--paper);
     margin-top: 4px;
 }
+
+#view-all-stats-btn {
+    display: block;
+    margin-top: 16px;
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    letter-spacing: 1px;
+    color: var(--ink-soft);
+    text-decoration: none;
+    border: 1px solid var(--line);
+    padding: 10px 14px;
+    background: #fff;
+}
+#view-all-stats-btn:hover {
+    border-color: var(--ink);
+    color: var(--ink);
+}
+#view-all-stats-btn.hidden { display: none; }
 
 #next-btn:hover {
     background: var(--paper);
