@@ -3,70 +3,97 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>ArbeitHelp - Progress Charts</title>
+        <title>ArbeitHelp — Progress</title>
         <link rel="icon" type="image/svg+xml" href="./favicon.svg">
-        <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323:wght@400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700;9..144,800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
         <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+        <link rel="stylesheet" href="./common.css">
         <link rel="stylesheet" href="./stats.css">
     </head>
     <body>
+        <nav class="site-nav" aria-label="Primary">
+            <div class="site-nav-inner">
+                <a class="site-brand" href="index.html"><span class="site-brand-dot" aria-hidden="true"></span> ArbeitHelp</a>
+                <div class="site-nav-links">
+                    <a href="index.html">Practice</a>
+                    <a class="active" href="stats.html">Progress</a>
+                    <a href="index.html#about">About</a>
+                </div>
+                <div class="site-nav-meta"><span class="status-dot online" aria-hidden="true"></span> Progress</div>
+            </div>
+        </nav>
+
         <div class="term-bar" aria-hidden="true">
             <span>ARBEITHELP://stats</span>
-            <span class="term-bar-right">v1.0 // progress</span>
+            <span class="term-bar-right">v1.1 // progress</span>
         </div>
 
         <div id="lock-screen" class="lock-screen hidden">
-            <h2>PROGRESS LOCKED</h2>
-            <p>Answer <span id="lock-required-count">1</span> questions to unlock stats</p>
+            <h2>Progress locked</h2>
+            <p>Answer <span id="lock-required-count">1</span> questions to unlock your stats.</p>
             <p>You've answered: <span id="lock-answered">0</span> / <span id="lock-required-total">1</span></p>
-            <a id="lock-start-btn" href="questions.html?role=Software%20Engineer">START PRACTICING -></a>
+            <a id="lock-start-btn" href="index.html#launcher">Start practicing →</a>
         </div>
 
-        <div id="stats-content" class="hidden">
+        <div id="stats-content" class="hidden stats-page">
             <header class="stats-header">
-                <a href="index.html" class="back"><- BACK</a>
-                <h1> PROGRESS </h1>
-                <p id="stats-subtitle">// YOUR INTERVIEW JOURNEY //</p>
+                <p class="section-label">Progress</p>
+                <h1>Your progress</h1>
+                <p id="stats-subtitle">All-time trends plus your most recent session on this device.</p>
             </header>
 
-            <section class="stats-summary">
-                <div class="stat-card"><span id="stat-total-qs">0</span><label>QUESTIONS</label></div>
-                <div class="stat-card"><span id="stat-avg">0.0</span><label>AVG SCORE</label></div>
-                <div class="stat-card"><span id="start-streak">0</span><label>STREAK</label></div>
-                <div class="stat-card"><span id="stat-best-role">-</span><label>BEST ROLE</label></div>
+            <section id="last-session-section" class="hidden last-session-section">
+                <div class="last-session-head">
+                    <h2>This session</h2>
+                    <p id="last-session-meta" class="last-session-meta"></p>
+                </div>
+                <div id="last-session-cards" class="stats-summary" style="margin-bottom:16px"></div>
+                <div id="last-session-recap"></div>
+                <p class="stats-scope-note" style="margin-top:12px">↑ This session only (stored on this device). Below is your lifetime history.</p>
             </section>
 
+            <h2 class="stats-divider">All-time</h2>
+
+            <section class="stats-summary">
+                <div class="stat-card"><span id="stat-total-qs">0</span><label>Questions (all time)</label></div>
+                <div class="stat-card"><span id="stat-avg">0.0</span><label>Avg score (all time)</label></div>
+                <div class="stat-card"><span id="start-streak">0</span><label>Streak</label></div>
+                <div class="stat-card"><span id="stat-best-role">-</span><label>Best role</label></div>
+            </section>
+            <p class="stats-scope-note">All numbers above cover every completed session. For this session only, see the card above or its recap page.</p>
+
             <section class="stats-weak" id="weak-topics">
-                <h3>// WEAKEST TOPICS //</h3>
+                <h3>Weakest topics</h3>
                 <div id="weak-topics-list" class="weak-topics-list"></div>
             </section>
 
             <section class="charts-grid">
                 <div class="chart-container">
-                    <h3>SCORE OVER TIME</h3>
+                    <h3>Score over time</h3>
                     <canvas id="chart-time-series"></canvas>
                 </div>
                 <div class="chart-container">
-                    <h3>BY ROLE</h3>
+                    <h3>By role</h3>
                     <canvas id="chart-by-role"></canvas>
                 </div>
                 <div class="chart-container">
-                    <h3>BY DIFFICULTY</h3>
+                    <h3>By difficulty</h3>
                     <canvas id="chart-by-difficulty"></canvas>
                 </div>
                 <div class="chart-container">
-                    <h3>SCORE DISTRIBUTION</h3>
+                    <h3>Score distribution</h3>
                     <canvas id="chart-distribution"></canvas>
                 </div>
             </section>
 
             <section class="stats-action">
-                <button id="export-all-json" class="export-btn" onclick="exportJSON()">EXPORT ALL HISTORY</button>
-                <button id="export-all-pdf" class="export-btn pdf-btn" onclick="exportPDF()">EXPORT ALL HISTORY (PDF)</button>
+                <button id="export-all-json" class="export-btn" onclick="exportJSON()">Export history (JSON)</button>
+                <button id="export-all-pdf" class="export-btn pdf-btn" onclick="exportPDF()">Export report (PDF)</button>
             </section>
 
             <div class="footer">
-                <span>ArbeitHelp v1.0</span>
+                <span>ArbeitHelp v1.1</span>
+                <span><a href="index.html" style="color:inherit;text-decoration:none;">← Back to practice</a></span>
             </div>
         </div>
 

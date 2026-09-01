@@ -1,14 +1,18 @@
-const TIMER_SECONDS = 120;
 const SESSION_LENGTH_DEFAULT = 5;
 
 let role = null;
+let targetDifficulty = 'mixed';
+let jdText = '';
 let questionsAnswered = 0;
 let currentQuestionNumber = 1;
 let sessionLength = SESSION_LENGTH_DEFAULT;
 let sessionScore = 0;
-let timeRemaining = TIMER_SECONDS;
 let timerInterval = null;
 let timerHidden = false;
+let questionStartedAt = null;
+let sessionStartedAt = null;
+let questionElapsed = 0;
+let sessionElapsed = 0;
 let authToken = null;
 let sessionToken = null;
 let sessionCompleted = false;
@@ -61,28 +65,24 @@ function applyTimerVisibility() {
     }
 }
 
+function formatTime(totalSeconds) {
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
+
 function updateDisplay() {
     const timerEl = el('timer-display');
-    const timerFillEl = el('timer-fill');
-    if (!timerEl || !timerFillEl) return;
-
-    const mins = Math.floor(timeRemaining / 60);
-    const sec = timeRemaining % 60;
-    timerEl.textContent = `${mins}:${sec.toString().padStart(2, '0')}`;
-
-    const pct = Math.max((timeRemaining / TIMER_SECONDS) * 100, 0);
-    timerFillEl.style.width = pct + '%';
-
-    timerEl.classList.remove('warning', 'critical');
-    timerFillEl.classList.remove('warning', 'critical');
-
-    if (timeRemaining <= 10) {
-        timerEl.classList.add('critical');
-        timerFillEl.classList.add('critical');
-    } else if (timeRemaining <= 30) {
-        timerEl.classList.add('warning');
-        timerFillEl.classList.add('warning');
+    const sessionEl = el('session-timer');
+    if (!timerEl) return;
+    if (questionStartedAt !== null) {
+        questionElapsed = Math.floor((Date.now() - questionStartedAt) / 1000);
     }
+    if (sessionStartedAt !== null) {
+        sessionElapsed = Math.floor((Date.now() - sessionStartedAt) / 1000);
+    }
+    timerEl.textContent = formatTime(questionElapsed);
+    if (sessionEl) sessionEl.textContent = `Total ${formatTime(sessionElapsed)}`;
 }
 
 function stopTimer() {
@@ -90,20 +90,22 @@ function stopTimer() {
         clearInterval(timerInterval);
         timerInterval = null;
     }
+    // freeze elapsed values
+    if (questionStartedAt !== null) {
+        questionElapsed = Math.floor((Date.now() - questionStartedAt) / 1000);
+    }
+    if (sessionStartedAt !== null) {
+        sessionElapsed = Math.floor((Date.now() - sessionStartedAt) / 1000);
+    }
 }
 
 function startTimerForQuestion() {
     stopTimer();
-    timeRemaining = TIMER_SECONDS;
+    questionStartedAt = Date.now();
+    if (sessionStartedAt === null) sessionStartedAt = questionStartedAt;
+    questionElapsed = 0;
     updateDisplay();
-    timerInterval = setInterval(() => {
-        timeRemaining -= 1;
-        updateDisplay();
-        if (timeRemaining <= 0) {
-            stopTimer();
-            handleTime();
-        }
-    }, 1000);
+    timerInterval = setInterval(updateDisplay, 1000);
 }
 
 function hideTimer() {
@@ -139,6 +141,17 @@ function setLoadingQuestion() {
     display.appendChild(cursor);
     setBadge('difficulty-lvl', '', '');
     setBadge('question-source', '', '');
+    const hintBtn = el('hint-btn');
+    if (hintBtn) hintBtn.classList.add('hidden');
+    const hintBox = el('hint-box');
+    if (hintBox) hintBox.classList.add('hidden');
+    const hintEl = el('expectation-hint');
+    if (hintEl) {
+        hintEl.classList.add('hidden');
+        hintEl.textContent = '';
+    }
+    const endBtn = el('end-session-btn');
+    if (endBtn) endBtn.classList.toggle('hidden', sessionCompleted || !sessionToken);
 }
 
 function showQuestionRetry() {
@@ -205,7 +218,26 @@ function resetActionButtons() {
 function renderQuestion(data) {
     setQuestionDisplay(data.question || '');
     setBadge('difficulty-lvl', (data.difficulty || '').toUpperCase(), data.difficulty || '');
-    setBadge('question-source', data.question_source_label || '', data.question_source === 'ai' ? 'ai' : 'fallback');
+    setBadge('question-source', data.question_source_label || '', data.question_source || 'fallback');
+    const hintEl = el('expectation-hint');
+    if (hintEl) {
+        hintEl.textContent = data.expectation_hint || '';
+        hintEl.classList.toggle('hidden', !data.expectation_hint);
+    }
+    const hintBtn = el('hint-btn');
+    if (hintBtn) {
+        hintBtn.classList.remove('hidden');
+        hintBtn.disabled = false;
+        hintBtn.textContent = 'NEED A HINT';
+    }
+    const hintBox = el('hint-box');
+    if (hintBox) {
+        hintBox.classList.add('hidden');
+        const hintText = el('hint-text');
+        if (hintText) hintText.textContent = '';
+    }
+    const endBtn = el('end-session-btn');
+    if (endBtn) endBtn.classList.toggle('hidden', !!sessionCompleted);
     const feedbackBox = el('feedback-box');
     if (feedbackBox) feedbackBox.classList.add('hidden');
     const feedbackText = el('feedback-text');
@@ -301,7 +333,63 @@ function applyCorrection() {
     closeCorrection();
 }
 
+let lastRecapSummary = null;
+
+function formatRecapText(summary) {
+    if (!summary || !Array.isArray(summary.questions)) return '';
+    const role = (summary.role || 'Session').toUpperCase();
+    const answered = summary.questions_answered ?? summary.questions.filter(q => !q.skipped).length;
+    const total = summary.session_length ?? summary.questions.length ?? 5;
+    const score = summary.session_score ?? summary.total_points ?? 0;
+    const elapsedList = summary.questions.filter(q => typeof q.elapsed_seconds === 'number' && q.elapsed_seconds !== null).map(q => q.elapsed_seconds);
+    const avg = elapsedList.length ? Math.round(elapsedList.reduce((a,b)=>a+b,0)/elapsedList.length) : null;
+    const avgStr = avg !== null ? ` · avg ${Math.floor(avg/60)}:${String(avg%60).padStart(2,'0')}/q` : '';
+    const lines = [];
+    lines.push(`${role} — ${answered}/${total} answered · ${score}/${total*3} pts${avgStr}`);
+    lines.push('');
+    summary.questions.forEach((q, i) => {
+        const pts = q.skipped ? 'SKIPPED' : `${q.points ?? 0}/3`;
+        const tm = (typeof q.elapsed_seconds === 'number' && q.elapsed_seconds !== null) ? ` ${Math.floor(q.elapsed_seconds/60)}:${String(q.elapsed_seconds%60).padStart(2,'0')}` : '';
+        const hint = q.hint_used ? ' HINT' : '';
+        lines.push(`Q${i+1} [${(q.difficulty||'').toUpperCase()||'GENERAL'}] ${pts}${tm}${hint} — ${q.question}`);
+        if (q.feedback) lines.push(`  Feedback: ${q.feedback}`);
+    });
+    const jd = summary.jd_coverage;
+    if (jd && ((jd.covered && jd.covered.length) || (jd.missed && jd.missed.length))) {
+        lines.push('');
+        lines.push(`JD covered: ${(jd.covered||[]).join(', ') || '—'} | missed: ${(jd.missed||[]).join(', ') || '—'}`);
+    }
+    return lines.join('\n');
+}
+
+async function copyRecap() {
+    const btn = el('copy-recap-btn');
+    const text = formatRecapText(lastRecapSummary);
+    if (!text) return;
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text);
+        else {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            ta.remove();
+        }
+        if (btn) {
+            const prev = btn.textContent;
+            btn.textContent = 'Copied ✓';
+            setTimeout(() => { btn.textContent = prev; }, 1400);
+        }
+    } catch {}
+}
+
 function renderRecap(summary) {
+    lastRecapSummary = summary;
+    const copyBtn = el('copy-recap-btn');
+    if (copyBtn) copyBtn.classList.toggle('hidden', !summary || !Array.isArray(summary.questions) || !summary.questions.length);
     const recapBox = el('recap-box');
     const recapList = el('recap-list');
     if (!recapBox || !recapList) return;
@@ -330,6 +418,20 @@ function renderRecap(summary) {
         head.appendChild(qLabel);
         head.appendChild(topic);
         head.appendChild(pts);
+        if (typeof q.elapsed_seconds === 'number' && q.elapsed_seconds !== null) {
+            const tm = document.createElement('span');
+            tm.className = 'recap-time';
+            const m = Math.floor(q.elapsed_seconds / 60);
+            const s = q.elapsed_seconds % 60;
+            tm.textContent = `${m}:${String(s).padStart(2,'0')}`;
+            head.appendChild(tm);
+        }
+        if (q.hint_used) {
+            const tag = document.createElement('span');
+            tag.className = 'recap-hint';
+            tag.textContent = 'HINT';
+            head.appendChild(tag);
+        }
         item.appendChild(head);
 
         const qText = document.createElement('p');
@@ -345,12 +447,49 @@ function renderRecap(summary) {
         }
         recapList.appendChild(item);
     });
+
+    const oldCoverage = el('jd-coverage');
+    if (oldCoverage) oldCoverage.remove();
+    const jd = summary.jd_coverage;
+    const covered = (jd && Array.isArray(jd.covered)) ? jd.covered : [];
+    const missed = (jd && Array.isArray(jd.missed)) ? jd.missed : [];
+    if (covered.length || missed.length) {
+        const coverage = document.createElement('div');
+        coverage.id = 'jd-coverage';
+        coverage.className = 'jd-coverage';
+        const head = document.createElement('div');
+        head.className = 'jd-coverage-head';
+        head.textContent = 'JD COVERAGE';
+        coverage.appendChild(head);
+        [['covered', 'COVERED'], ['missed', 'MISSED']].forEach(([key, label]) => {
+            const terms = key === 'covered' ? covered : missed;
+            if (!terms.length) return;
+            const rowEl = document.createElement('div');
+            rowEl.className = 'jd-row';
+            const lbl = document.createElement('span');
+            lbl.className = 'jd-label ' + key;
+            lbl.textContent = label;
+            rowEl.appendChild(lbl);
+            terms.forEach(term => {
+                const chip = document.createElement('span');
+                chip.className = 'jd-chip ' + key;
+                chip.textContent = term;
+                rowEl.appendChild(chip);
+            });
+            coverage.appendChild(rowEl);
+        });
+        recapBox.appendChild(coverage);
+    }
     recapBox.classList.remove('hidden');
 }
 
 function showCompletionState(summary) {
     sessionCompleted = true;
     stopTimer();
+    try {
+        localStorage.setItem('last_session_summary', JSON.stringify(summary));
+        localStorage.setItem('last_session_at', new Date().toISOString());
+    } catch {}
     clearSessionStorage();
     sessionToken = null;
 
@@ -363,9 +502,9 @@ function showCompletionState(summary) {
     currentQuestionNumber = completedLength;
     updateProgressUI();
 
-    setQuestionDisplay('INTERVIEW COMPLETE');
+    setQuestionDisplay('INTERVIEW COMPLETE — THIS SESSION');
     setBadge('difficulty-lvl', 'COMPLETE', 'complete');
-    setBadge('question-source', 'SESSION COMPLETE', 'complete');
+    setBadge('question-source', 'THIS SESSION', 'complete');
 
     const answer = el('user-answer');
     if (answer) answer.disabled = true;
@@ -378,6 +517,12 @@ function showCompletionState(summary) {
     if (skipBtn) skipBtn.disabled = true;
     const improveBtn = el('improve-btn');
     if (improveBtn) improveBtn.classList.add('hidden');
+    const hintBtn = el('hint-btn');
+    if (hintBtn) hintBtn.classList.add('hidden');
+    const hintBox = el('hint-box');
+    if (hintBox) hintBox.classList.add('hidden');
+    const endBtn2 = el('end-session-btn');
+    if (endBtn2) endBtn2.classList.add('hidden');
 
     const feedbackBox = el('feedback-box');
     const feedbackText = el('feedback-text');
@@ -389,22 +534,24 @@ function showCompletionState(summary) {
     if (feedbackBox) feedbackBox.classList.remove('hidden');
     if (feedbackText) {
         feedbackText.classList.remove('loading');
-        feedbackText.textContent = `Session complete. Total score: ${completedScore}/${completedLength * 3}.`;
+        const elapsedList = (summary.questions || []).filter(q => typeof q.elapsed_seconds === 'number' && q.elapsed_seconds !== null).map(q => q.elapsed_seconds);
+        const avg = elapsedList.length ? Math.round(elapsedList.reduce((a,b)=>a+b,0)/elapsedList.length) : null;
+        const avgStr = avg !== null ? ` · avg ${Math.floor(avg/60)}:${String(avg%60).padStart(2,'0')}/q` : '';
+        feedbackText.textContent = `This session: ${completedScore}/${completedLength * 3} pts — ${completedAnswered}/${completedLength} answered${avgStr}.`;
     }
     if (breakdownText) {
-        breakdownText.textContent = `Answered ${completedAnswered}/${completedLength} questions.`;
+        breakdownText.textContent = `Score reflects this session only (not lifetime).`;
     }
     if (scoreDisplay) {
-        scoreDisplay.textContent = `${completedScore}/${completedLength * 3} SESSION PTS`;
+        scoreDisplay.textContent = `${completedScore}/${completedLength * 3} THIS SESSION`;
     }
-    if (ratingLabel) ratingLabel.textContent = 'SESSION COMPLETE';
+    if (ratingLabel) ratingLabel.textContent = "THIS SESSION'S RESULTS";
     if (nextBtn) {
-        nextBtn.textContent = 'VIEW STATS ->';
-        nextBtn.onclick = () => {
-            location.href = 'stats.html';
-        };
-        nextBtn.style.display = 'block';
+        nextBtn.style.display = 'none';
+        nextBtn.onclick = null;
     }
+    const viewAllStats = el('view-all-stats-btn');
+    if (viewAllStats) viewAllStats.classList.remove('hidden');
     renderRecap(summary);
 }
 
@@ -417,10 +564,12 @@ async function ensureSession() {
         return sessionToken;
     }
     clearSessionStorage();
+    const body = {role, difficulty: targetDifficulty};
+    if (jdText) body.job_description = jdText;
     const res = await fetchJSON('/session/start', {
         method: 'POST',
         headers: authHeaders(authToken),
-        body: JSON.stringify({role})
+        body: JSON.stringify(body)
     });
     const data = await res.json();
     sessionToken = data.session_token;
@@ -510,10 +659,11 @@ async function submitAnswer() {
 
     try {
         await ensureSession();
+        const elapsedForSubmit = questionElapsed;
         const res = await fetchJSON('/session/submit', {
             method: 'POST',
             headers: authHeaders(sessionToken),
-            body: JSON.stringify({answer}),
+            body: JSON.stringify({answer, elapsed_seconds: elapsedForSubmit}),
             signal: submitAbortControl.signal
         });
         const data = await res.json();
@@ -593,7 +743,6 @@ function resetAnswerArea() {
 
 async function nextQuestion() {
     if (sessionCompleted) {
-        location.href = 'stats.html';
         return;
     }
     clearTimeout(submitTimeoutId);
@@ -621,9 +770,11 @@ async function skipQuestion() {
 
     try {
         await ensureSession();
+        const elapsedForSkip = questionElapsed;
         const res = await fetchJSON('/session/skip', {
             method: 'POST',
-            headers: authHeaders(sessionToken)
+            headers: authHeaders(sessionToken),
+            body: JSON.stringify({elapsed_seconds: elapsedForSkip})
         });
         const data = await res.json();
         applySessionState(data);
@@ -638,13 +789,61 @@ async function skipQuestion() {
     await loadQuestion();
 }
 
-async function handleTime() {
-    if (isSubmitting) return;
-    const answer = (el('user-answer')?.value || '').trim();
-    if (answer) {
-        await submitAnswer();
-    } else {
-        await skipQuestion();
+async function getHint() {
+    const btn = el('hint-btn');
+    const box = el('hint-box');
+    const text = el('hint-text');
+    if (!btn || !box || !text || btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = '...thinking...';
+    try {
+        await ensureSession();
+        const res = await fetchJSON('/session/hint', {
+            method: 'POST',
+            headers: authHeaders(sessionToken)
+        });
+        const data = await res.json();
+        text.textContent = data.hint || '';
+        box.classList.remove('hidden');
+        btn.classList.add('hidden');
+    } catch (err) {
+        if (err.status === 401 || err.status === 403) {
+            sessionToken = null;
+            clearSessionStorage();
+        }
+        alert('Hint unavailable right now.');
+        btn.disabled = false;
+        btn.textContent = 'NEED A HINT';
+    }
+}
+
+async function endSession() {
+    if (sessionCompleted) return;
+    if (!confirm("End session early? Your progress so far will be saved and you cannot resume.")) return;
+    const btn = el('end-session-btn');
+    if (btn) btn.disabled = true;
+    try {
+        await ensureSession();
+        const res = await fetchJSON('/session/end', {
+            method: 'POST',
+            headers: authHeaders(sessionToken)
+        });
+        const data = await res.json();
+        showCompletionState(data);
+    } catch (err) {
+        if (err.status === 409) {
+            const data = await err.response.json().catch(() => ({}));
+            if (data.summary) {
+                showCompletionState(data.summary);
+                return;
+            }
+        }
+        if (err.status === 401 || err.status === 403) {
+            sessionToken = null;
+            clearSessionStorage();
+        }
+        alert('Could not end session.');
+        if (btn) btn.disabled = false;
     }
 }
 
@@ -729,6 +928,9 @@ async function init() {
     authToken = await initAuth();
     const params = new URLSearchParams(window.location.search);
     role = params.get('role');
+    targetDifficulty = params.get('difficulty') || 'mixed';
+    jdText = sessionStorage.getItem('jd_text') || '';
+    sessionStorage.removeItem('jd_text');
 
     if (!role) {
         alert('Role not given. Please provide a role in the URL query parameters.');

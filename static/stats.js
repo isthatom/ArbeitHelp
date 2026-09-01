@@ -17,6 +17,8 @@ async function init() {
     document.getElementById('lock-screen').classList.add('hidden');
     document.getElementById('stats-content').classList.remove('hidden');
 
+    renderLastSession();
+
     fetch('/stats/summary', { headers: authHeaders(authToken) })
         .then(function(r) { return r.json(); })
         .then(function(d) {
@@ -31,6 +33,136 @@ async function init() {
         .then(function(r) { return r.json(); })
         .then(function(d) { buildCharts(d); })
         .catch(function() {});
+}
+
+function renderLastSession() {
+    const section = document.getElementById('last-session-section');
+    if (!section) return;
+    let summary = null;
+    let at = null;
+    try {
+        const raw = localStorage.getItem('last_session_summary');
+        const rawAt = localStorage.getItem('last_session_at');
+        if (raw) summary = JSON.parse(raw);
+        if (rawAt) at = rawAt;
+    } catch {}
+    if (!summary || !Array.isArray(summary.questions)) {
+        section.classList.add('hidden');
+        return;
+    }
+    section.classList.remove('hidden');
+    const meta = document.getElementById('last-session-meta');
+    if (meta) {
+        const when = at ? new Date(at).toLocaleString() : '';
+        const answered = summary.questions_answered ?? summary.questions.filter(q => !q.skipped).length;
+        const total = summary.session_length ?? 5;
+        const score = summary.session_score ?? summary.total_points ?? 0;
+        const role = summary.role || '—';
+        meta.textContent = role.toUpperCase() + ' • ' + answered + '/' + total + ' answered • ' + score + '/' + (total * 3) + ' pts' + (when ? ' • ' + when : '') + ' • THIS DEVICE ONLY';
+    }
+    const cardsHost = document.getElementById('last-session-cards');
+    if (cardsHost) {
+        cardsHost.replaceChildren();
+        const makeCard = (value, label) => {
+            const card = document.createElement('div');
+            card.className = 'stat-card';
+            const span = document.createElement('span');
+            span.textContent = value;
+            const lab = document.createElement('label');
+            lab.textContent = label;
+            card.appendChild(span);
+            card.appendChild(lab);
+            return card;
+        };
+        const answered = summary.questions_answered ?? summary.questions.filter(q => !q.skipped).length;
+        const total = summary.session_length ?? 5;
+        const score = summary.session_score ?? summary.total_points ?? 0;
+        cardsHost.appendChild(makeCard(score + '/' + (total * 3), 'THIS SESSION SCORE'));
+        cardsHost.appendChild(makeCard(answered + '/' + total, 'ANSWERED'));
+        if (summary.jd_coverage && (summary.jd_coverage.covered || summary.jd_coverage.missed)) {
+            const covered = (summary.jd_coverage.covered || []).length;
+            const missed = (summary.jd_coverage.missed || []).length;
+            cardsHost.appendChild(makeCard(covered + '/' + (covered + missed), 'JD COVERED'));
+        }
+    }
+    const recapHost = document.getElementById('last-session-recap');
+    if (recapHost) {
+        recapHost.replaceChildren();
+        (summary.questions || []).forEach((q, i) => {
+            const item = document.createElement('div');
+            item.className = 'recap-item';
+            const head = document.createElement('div');
+            head.className = 'recap-head';
+            const qLabel = document.createElement('span');
+            qLabel.className = 'recap-qnum';
+            qLabel.textContent = 'Q' + (i + 1);
+            const topic = document.createElement('span');
+            topic.className = 'recap-topic';
+            topic.textContent = (q.topic || 'GENERAL').toUpperCase();
+            const pts = document.createElement('span');
+            const skipped = !!q.skipped;
+            pts.className = 'recap-pts ' + (skipped ? 'skipped' : (q.points === 3 ? 'good' : (q.points === 0 ? 'bad' : 'mid')));
+            pts.textContent = skipped ? 'SKIPPED' : ((q.points ?? 0) + '/3 PTS');
+            head.appendChild(qLabel);
+            head.appendChild(topic);
+            head.appendChild(pts);
+            if (typeof q.elapsed_seconds === 'number' && q.elapsed_seconds !== null) {
+                const tm = document.createElement('span');
+                tm.className = 'recap-time';
+                const m = Math.floor(q.elapsed_seconds / 60);
+                const s = q.elapsed_seconds % 60;
+                tm.textContent = `${m}:${String(s).padStart(2,'0')}`;
+                head.appendChild(tm);
+            }
+            if (q.hint_used) {
+                const tag = document.createElement('span');
+                tag.className = 'recap-hint';
+                tag.textContent = 'HINT';
+                head.appendChild(tag);
+            }
+            item.appendChild(head);
+            const qText = document.createElement('p');
+            qText.className = 'recap-qtext';
+            qText.textContent = q.question;
+            item.appendChild(qText);
+            if (q.feedback) {
+                const fb = document.createElement('p');
+                fb.className = 'recap-feedback';
+                fb.textContent = q.feedback;
+                item.appendChild(fb);
+            }
+            recapHost.appendChild(item);
+        });
+        if (summary.jd_coverage && (summary.jd_coverage.covered?.length || summary.jd_coverage.missed?.length)) {
+            const jd = summary.jd_coverage;
+            const covered = jd.covered || [];
+            const missed = jd.missed || [];
+            const box = document.createElement('div');
+            box.className = 'jd-coverage';
+            const head = document.createElement('div');
+            head.className = 'jd-coverage-head';
+            head.textContent = 'JD COVERAGE — THIS SESSION';
+            box.appendChild(head);
+            [['covered','COVERED'],['missed','MISSED']].forEach(([key,label]) => {
+                const terms = key === 'covered' ? covered : missed;
+                if (!terms.length) return;
+                const rowEl = document.createElement('div');
+                rowEl.className = 'jd-row';
+                const lbl = document.createElement('span');
+                lbl.className = 'jd-label ' + key;
+                lbl.textContent = label;
+                rowEl.appendChild(lbl);
+                terms.forEach(term => {
+                    const chip = document.createElement('span');
+                    chip.className = 'jd-chip ' + key;
+                    chip.textContent = term;
+                    rowEl.appendChild(chip);
+                });
+                box.appendChild(rowEl);
+            });
+            recapHost.appendChild(box);
+        }
+    }
 }
 
 function renderWeakTopics(topics) {
@@ -91,7 +223,7 @@ function buildCharts(d) {
         },
         options: {
             responsive: true, maintainAspectRatio: true,
-            plugins: { legend: { display: false }, title: { display: true, text: 'Score Over Time', font: { family: 'Press Start 2P', size: 16 }}},
+            plugins: { legend: { display: false }, title: { display: true, text: 'Score Over Time (All Sessions)', font: { family: 'Press Start 2P', size: 16 }}},
             scales: {
                 y: { beginAtZero: true, max: 3, ticks: { stepSize: 1, font: { family: 'VT323', size: 12 }}, title: { display: true, text: 'Score (0-3)', font: { family: 'Press Start 2P', size: 12 }}},
                 x: { ticks: { font: { family: 'VT323', size: 12 }}, title: { display: true, text: 'Question #', font: { family: 'Press Start 2P', size: 12 }}},
