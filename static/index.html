@@ -3,14 +3,27 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>ArbeitHelp - AI Interview Practice</title>
+    <title>ArbeitHelp — AI Interview Practice</title>
     <link rel="icon" type="image/svg+xml" href="./favicon.svg">
-    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323:wght@400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700;9..144,800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./common.css">
     <link rel="stylesheet" href="./style.css">
     <script src="./common.js" defer></script>
     <script src="./script.js" defer></script>
 </head>
 <body>
+
+    <nav class="site-nav" aria-label="Primary">
+        <div class="site-nav-inner">
+            <a class="site-brand" href="index.html"><span class="site-brand-dot" aria-hidden="true"></span> ArbeitHelp</a>
+            <div class="site-nav-links">
+                <a class="active" href="index.html">Practice</a>
+                <a href="stats.html">Progress</a>
+                <a href="#about">About</a>
+            </div>
+            <div class="site-nav-meta"><span class="status-dot online" aria-hidden="true"></span> <span id="nav-status-text">AI online</span> · v1.1</div>
+        </div>
+    </nav>
 
     <div class="term-bar" aria-hidden="true">
         <span>ARBEITHELP://boot</span>
@@ -18,97 +31,105 @@
     </div>
 
     <section class="hero">
-        <p class="hero-eyebrow">\opensource & free\</p>
+        <div class="hero-copy">
+            <p class="hero-eyebrow">Open source &amp; free</p>
             <h1>ArbeitHelp</h1>
-            <p class="hero-tagline reveal">// AI Powered Interview Practice //</p>
-            <p id="typewriter-text" class="reveal"></p>
-            <p class="hero-cta reveal">⬇ SCROLL TO START</p>
+            <p class="hero-tagline">AI-powered interview practice that feels like real practice.</p>
+            <p id="typewriter-text" aria-live="polite"></p>
+            <div class="hero-actions">
+                <a class="btn-primary" href="#launcher">Start practicing →</a>
+                <a class="btn-ghost" href="#how">How it works</a>
+            </div>
+            <div id="hero-proof" class="hero-proof" aria-live="polite"><span class="hero-proof-dot" aria-hidden="true"></span> <span id="hero-proof-text">Loading roles…</span></div>
+            <p class="hero-cta">↓ scroll to start</p>
+        </div>
+        <div class="hero-preview" aria-hidden="true">
+            <div class="hero-preview-head"><span>Live preview</span> <span class="hero-preview-badge">AI graded</span></div>
+            <p class="hero-preview-q">“Tell me about a time you fixed a production bug under a tight deadline.”</p>
+            <div class="hero-preview-meta">
+                <span class="preview-chip hit">STAR</span>
+                <span class="preview-chip hit">root cause</span>
+                <span class="preview-chip">trade-off</span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:0.72rem;"><span style="color:var(--accent);font-weight:600;">2/3</span> Keep it concise — add one metric.</div>
+        </div>
     </section>
 
-    <section class="landing-section about-section">
-        <p class="section-label reveal">// ABOUT //</p>
-        <h2 class="reveal"> For those who actually care </h2>
-
+    <section id="about" class="landing-section about-section">
+        <p class="section-label reveal">// About //</p>
+        <h2 class="reveal">For those who actually care</h2>
         <p class="reveal">
-            Most interview prep tools feel like textbooks and are genuinely boring, so I'm trying to make it a bit more fun.
-            Wanna actually land a job or internship? Pick a role and get real questions from an AI.
+            Most interview prep feels like textbooks — slow, generic, and easy to ignore. ArbeitHelp is a focused alternative: pick a role, paste a job description if you have one, and get real, graded practice in minutes.
         </p>
-        <p class="reveal" style="margin-top: 4px;">
-            Built by Omkar (and Claude :P)
+        <p class="reveal" style="margin-top:4px;">
+            Built by Omkar (and Claude :P) · open source · no paywall.
         </p>
     </section>
 
-    <section class="landing-section how-section">
-        <h3 class="section-label reveal">//HOW IT WORKS //</h3>
+    <section id="how" class="landing-section how-section">
+        <h3 class="section-label reveal">// How it works //</h3>
         <div class="steps">
             <div class="step reveal">
                 <span class="step-num">01</span>
                 <div class="step-body">
-                    <h3>PICK YOUR ROLE!</h3>
-                    <p> Choose from a range of roles like Software Engineer, Consultant, Data Analyst, UI Designer, and more.
-                        Each role has tons of practice questions you can access to prep.
-                    </p>
+                    <h3>Pick your role</h3>
+                    <p>Choose Software Engineer, Consultant, Data Analyst, UI Designer, and more. Each role has a curated bank plus AI-generated variants.</p>
                 </div>
             </div>
             <div class="step reveal">
                 <span class="step-num">02</span>
                 <div class="step-body">
-                    <h3>GET UR GRADE AND SEE HOW COOKED U ARE INSTANTLY!</h3>
-                    <p>The AI grader checks ur answer for any technical keywords and core concepts and tells u how cooked u are.
-                    </p>
+                    <h3>Get graded instantly</h3>
+                    <p>AI checks keywords and concepts, gives you a 0–3 score, feedback, and an optional improved answer. Hint-capped at 2/3 if you peek.</p>
                 </div>
             </div>
             <div class="step reveal">
                 <span class="step-num">03</span>
                 <div class="step-body">
-                    <h3>KEEP GOING</h3>
-                    <p>Hit next question and repeat. Skip the ones you don't want to answer.</p>
+                    <h3>Keep going</h3>
+                    <p>Next question, skip, or end early. See your session recap on the page and all-time trends in Progress.</p>
                 </div>
-
-                
-
             </div>
         </div>
     </section>
-    <!-- STEP 1: CHOOSE ROLE -->
-    <div class="box">
-        <div class="box-label">STEP 1 — CHOOSE YOUR ROLE</div>
-        <p class="select-hint">// CLICK A ROLE TO SELECT //</p>
-        <div class="difficulty-row">
-            <label class="difficulty-label" for="difficulty-select">DIFFICULTY:</label>
-            <select id="difficulty-select">
-                <option value="mixed" selected>MIXED (DEFAULT)</option>
-                <option value="easy">EASY</option>
-                <option value="medium">MEDIUM</option>
-                <option value="hard">HARD</option>
-            </select>
+
+    <div id="launcher" class="box">
+        <div class="box-label"><span>Choose your role</span> <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;color:var(--muted);font-weight:400;">Step 1 → Start</span></div>
+        <div class="box-meta-row">
+            <p class="select-hint">// Tap a role — then start //</p>
+            <div class="difficulty-row">
+                <label class="difficulty-label" for="difficulty-select">Difficulty</label>
+                <select id="difficulty-select">
+                    <option value="mixed" selected>Mixed (default)</option>
+                    <option value="easy">Easy</option>
+                    <option value="medium">Medium</option>
+                    <option value="hard">Hard</option>
+                </select>
+            </div>
         </div>
         <details class="jd-details">
-            <summary>PASTE A JOB DESCRIPTION (OPTIONAL)</summary>
-            <textarea id="jd-text" rows="6"
-                placeholder="PASTE THE FULL JOB DESCRIPTION HERE. QUESTIONS WILL BE WEIGHTED TOWARD ITS SKILLS AND FOCUS AREAS."></textarea>
+            <summary>Paste a job description (optional)</summary>
+            <textarea id="jd-text" rows="5"
+                placeholder="Paste the full job description here. Questions will be weighted toward its skills and focus areas."></textarea>
             <div class="custom-role-row">
-                <label class="difficulty-label" for="custom-role">ROLE NAME:</label>
+                <label class="difficulty-label" for="custom-role">Role name</label>
                 <input id="custom-role" maxlength="80"
-                    placeholder="FOR JOBS OUTSIDE THE TILES, E.G. CHEMICAL ENGINEER">
+                    placeholder="For jobs outside the tiles, e.g. Chemical Engineer">
             </div>
-            <button id="analyze-jd-btn" type="button" onclick="analyzeJd()">ANALYZE JOB DESCRIPTION</button>
+            <button id="analyze-jd-btn" type="button" onclick="analyzeJd()">Analyze job description</button>
             <p id="jd-status" class="status-line hidden"></p>
             <div id="jd-preview" class="hidden"></div>
         </details>
         <p id="ai-mode-note" class="status-line warn hidden"></p>
-        <div class="role-grid" id="role-grid">
-
-        </div>
-        <button id="start-interview-btn" class="no-role" onclick="startInterview()">START INTERVIEW -&gt;</button>
+        <div class="role-grid" id="role-grid" role="listbox" aria-label="Roles"></div>
+        <button id="start-interview-btn" class="no-role" onclick="startInterview()">Start interview →</button>
         <p id="start-msg" class="status-line warn hidden"></p>
     </div>
 
-
-    <!-- FOOTER -->
+    <div id="tour-root" aria-live="polite"></div>
     <div class="footer">
-        <span>ArbeitHelp v1.0</span>
-        <span>Made with ❤️</span>
+        <span>ArbeitHelp v1.1</span>
+        <span>Made with care · Open source</span>
     </div>
 
 </body>

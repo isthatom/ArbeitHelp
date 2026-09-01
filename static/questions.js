@@ -1,4 +1,3 @@
-const TIMER_SECONDS = 120;
 const SESSION_LENGTH_DEFAULT = 5;
 
 let role = null;
@@ -8,9 +7,12 @@ let questionsAnswered = 0;
 let currentQuestionNumber = 1;
 let sessionLength = SESSION_LENGTH_DEFAULT;
 let sessionScore = 0;
-let timeRemaining = TIMER_SECONDS;
 let timerInterval = null;
 let timerHidden = false;
+let questionStartedAt = null;
+let sessionStartedAt = null;
+let questionElapsed = 0;
+let sessionElapsed = 0;
 let authToken = null;
 let sessionToken = null;
 let sessionCompleted = false;
@@ -63,28 +65,24 @@ function applyTimerVisibility() {
     }
 }
 
+function formatTime(totalSeconds) {
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
+
 function updateDisplay() {
     const timerEl = el('timer-display');
-    const timerFillEl = el('timer-fill');
-    if (!timerEl || !timerFillEl) return;
-
-    const mins = Math.floor(timeRemaining / 60);
-    const sec = timeRemaining % 60;
-    timerEl.textContent = `${mins}:${sec.toString().padStart(2, '0')}`;
-
-    const pct = Math.max((timeRemaining / TIMER_SECONDS) * 100, 0);
-    timerFillEl.style.width = pct + '%';
-
-    timerEl.classList.remove('warning', 'critical');
-    timerFillEl.classList.remove('warning', 'critical');
-
-    if (timeRemaining <= 10) {
-        timerEl.classList.add('critical');
-        timerFillEl.classList.add('critical');
-    } else if (timeRemaining <= 30) {
-        timerEl.classList.add('warning');
-        timerFillEl.classList.add('warning');
+    const sessionEl = el('session-timer');
+    if (!timerEl) return;
+    if (questionStartedAt !== null) {
+        questionElapsed = Math.floor((Date.now() - questionStartedAt) / 1000);
     }
+    if (sessionStartedAt !== null) {
+        sessionElapsed = Math.floor((Date.now() - sessionStartedAt) / 1000);
+    }
+    timerEl.textContent = formatTime(questionElapsed);
+    if (sessionEl) sessionEl.textContent = `Total ${formatTime(sessionElapsed)}`;
 }
 
 function stopTimer() {
@@ -92,20 +90,22 @@ function stopTimer() {
         clearInterval(timerInterval);
         timerInterval = null;
     }
+    // freeze elapsed values
+    if (questionStartedAt !== null) {
+        questionElapsed = Math.floor((Date.now() - questionStartedAt) / 1000);
+    }
+    if (sessionStartedAt !== null) {
+        sessionElapsed = Math.floor((Date.now() - sessionStartedAt) / 1000);
+    }
 }
 
 function startTimerForQuestion() {
     stopTimer();
-    timeRemaining = TIMER_SECONDS;
+    questionStartedAt = Date.now();
+    if (sessionStartedAt === null) sessionStartedAt = questionStartedAt;
+    questionElapsed = 0;
     updateDisplay();
-    timerInterval = setInterval(() => {
-        timeRemaining -= 1;
-        updateDisplay();
-        if (timeRemaining <= 0) {
-            stopTimer();
-            handleTime();
-        }
-    }, 1000);
+    timerInterval = setInterval(updateDisplay, 1000);
 }
 
 function hideTimer() {
@@ -333,7 +333,63 @@ function applyCorrection() {
     closeCorrection();
 }
 
+let lastRecapSummary = null;
+
+function formatRecapText(summary) {
+    if (!summary || !Array.isArray(summary.questions)) return '';
+    const role = (summary.role || 'Session').toUpperCase();
+    const answered = summary.questions_answered ?? summary.questions.filter(q => !q.skipped).length;
+    const total = summary.session_length ?? summary.questions.length ?? 5;
+    const score = summary.session_score ?? summary.total_points ?? 0;
+    const elapsedList = summary.questions.filter(q => typeof q.elapsed_seconds === 'number' && q.elapsed_seconds !== null).map(q => q.elapsed_seconds);
+    const avg = elapsedList.length ? Math.round(elapsedList.reduce((a,b)=>a+b,0)/elapsedList.length) : null;
+    const avgStr = avg !== null ? ` · avg ${Math.floor(avg/60)}:${String(avg%60).padStart(2,'0')}/q` : '';
+    const lines = [];
+    lines.push(`${role} — ${answered}/${total} answered · ${score}/${total*3} pts${avgStr}`);
+    lines.push('');
+    summary.questions.forEach((q, i) => {
+        const pts = q.skipped ? 'SKIPPED' : `${q.points ?? 0}/3`;
+        const tm = (typeof q.elapsed_seconds === 'number' && q.elapsed_seconds !== null) ? ` ${Math.floor(q.elapsed_seconds/60)}:${String(q.elapsed_seconds%60).padStart(2,'0')}` : '';
+        const hint = q.hint_used ? ' HINT' : '';
+        lines.push(`Q${i+1} [${(q.difficulty||'').toUpperCase()||'GENERAL'}] ${pts}${tm}${hint} — ${q.question}`);
+        if (q.feedback) lines.push(`  Feedback: ${q.feedback}`);
+    });
+    const jd = summary.jd_coverage;
+    if (jd && ((jd.covered && jd.covered.length) || (jd.missed && jd.missed.length))) {
+        lines.push('');
+        lines.push(`JD covered: ${(jd.covered||[]).join(', ') || '—'} | missed: ${(jd.missed||[]).join(', ') || '—'}`);
+    }
+    return lines.join('\n');
+}
+
+async function copyRecap() {
+    const btn = el('copy-recap-btn');
+    const text = formatRecapText(lastRecapSummary);
+    if (!text) return;
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text);
+        else {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            ta.remove();
+        }
+        if (btn) {
+            const prev = btn.textContent;
+            btn.textContent = 'Copied ✓';
+            setTimeout(() => { btn.textContent = prev; }, 1400);
+        }
+    } catch {}
+}
+
 function renderRecap(summary) {
+    lastRecapSummary = summary;
+    const copyBtn = el('copy-recap-btn');
+    if (copyBtn) copyBtn.classList.toggle('hidden', !summary || !Array.isArray(summary.questions) || !summary.questions.length);
     const recapBox = el('recap-box');
     const recapList = el('recap-list');
     if (!recapBox || !recapList) return;
@@ -362,6 +418,14 @@ function renderRecap(summary) {
         head.appendChild(qLabel);
         head.appendChild(topic);
         head.appendChild(pts);
+        if (typeof q.elapsed_seconds === 'number' && q.elapsed_seconds !== null) {
+            const tm = document.createElement('span');
+            tm.className = 'recap-time';
+            const m = Math.floor(q.elapsed_seconds / 60);
+            const s = q.elapsed_seconds % 60;
+            tm.textContent = `${m}:${String(s).padStart(2,'0')}`;
+            head.appendChild(tm);
+        }
         if (q.hint_used) {
             const tag = document.createElement('span');
             tag.className = 'recap-hint';
@@ -470,7 +534,10 @@ function showCompletionState(summary) {
     if (feedbackBox) feedbackBox.classList.remove('hidden');
     if (feedbackText) {
         feedbackText.classList.remove('loading');
-        feedbackText.textContent = `This session: ${completedScore}/${completedLength * 3} pts — ${completedAnswered}/${completedLength} answered.`;
+        const elapsedList = (summary.questions || []).filter(q => typeof q.elapsed_seconds === 'number' && q.elapsed_seconds !== null).map(q => q.elapsed_seconds);
+        const avg = elapsedList.length ? Math.round(elapsedList.reduce((a,b)=>a+b,0)/elapsedList.length) : null;
+        const avgStr = avg !== null ? ` · avg ${Math.floor(avg/60)}:${String(avg%60).padStart(2,'0')}/q` : '';
+        feedbackText.textContent = `This session: ${completedScore}/${completedLength * 3} pts — ${completedAnswered}/${completedLength} answered${avgStr}.`;
     }
     if (breakdownText) {
         breakdownText.textContent = `Score reflects this session only (not lifetime).`;
@@ -592,10 +659,11 @@ async function submitAnswer() {
 
     try {
         await ensureSession();
+        const elapsedForSubmit = questionElapsed;
         const res = await fetchJSON('/session/submit', {
             method: 'POST',
             headers: authHeaders(sessionToken),
-            body: JSON.stringify({answer}),
+            body: JSON.stringify({answer, elapsed_seconds: elapsedForSubmit}),
             signal: submitAbortControl.signal
         });
         const data = await res.json();
@@ -702,9 +770,11 @@ async function skipQuestion() {
 
     try {
         await ensureSession();
+        const elapsedForSkip = questionElapsed;
         const res = await fetchJSON('/session/skip', {
             method: 'POST',
-            headers: authHeaders(sessionToken)
+            headers: authHeaders(sessionToken),
+            body: JSON.stringify({elapsed_seconds: elapsedForSkip})
         });
         const data = await res.json();
         applySessionState(data);
@@ -717,16 +787,6 @@ async function skipQuestion() {
     }
 
     await loadQuestion();
-}
-
-async function handleTime() {
-    if (isSubmitting) return;
-    const answer = (el('user-answer')?.value || '').trim();
-    if (answer) {
-        await submitAnswer();
-    } else {
-        await skipQuestion();
-    }
 }
 
 async function getHint() {

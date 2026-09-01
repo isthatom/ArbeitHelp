@@ -106,6 +106,14 @@ function renderLastSession() {
             head.appendChild(qLabel);
             head.appendChild(topic);
             head.appendChild(pts);
+            if (typeof q.elapsed_seconds === 'number' && q.elapsed_seconds !== null) {
+                const tm = document.createElement('span');
+                tm.className = 'recap-time';
+                const m = Math.floor(q.elapsed_seconds / 60);
+                const s = q.elapsed_seconds % 60;
+                tm.textContent = `${m}:${String(s).padStart(2,'0')}`;
+                head.appendChild(tm);
+            }
             if (q.hint_used) {
                 const tag = document.createElement('span');
                 tag.className = 'recap-hint';

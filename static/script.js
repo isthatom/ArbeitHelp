@@ -9,26 +9,31 @@ async function loadRoles() {
     const roles = await res.json()
     // classifying them to be able to be recognizable by HTML file
     const grid = document.getElementById('role-grid');
-    if (!grid) return;
+    if (grid) {
+        grid.replaceChildren();
+        roles.forEach(r => {
+            const btn = document.createElement('button');
+            btn.className = 'role-btn';
+            btn.type = 'button';
+            btn.dataset.role = r.name;
+            btn.addEventListener('click', () => selectRole(r.name));
 
-    grid.replaceChildren();
-    roles.forEach(r => {
-        const btn = document.createElement('button');
-        btn.className = 'role-btn';
-        btn.type = 'button';
-        btn.dataset.role = r.name;
-        btn.addEventListener('click', () => selectRole(r.name));
+            const title = document.createElement('span');
+            title.textContent = `${r.emoji} ${r.name}`;
+            btn.appendChild(title);
 
-        const title = document.createElement('span');
-        title.textContent = `${r.emoji} ${r.name}`;
-        btn.appendChild(title);
+            const tagline = document.createElement('span');
+            tagline.textContent = r.tagline;
+            btn.appendChild(tagline);
 
-        const tagline = document.createElement('span');
-        tagline.textContent = r.tagline;
-        btn.appendChild(tagline);
-
-        grid.appendChild(btn);
-    }); // format of the role names, done to avoid repetitions
+            grid.appendChild(btn);
+        }); // format of the role names, done to avoid repetitions
+    }
+    const proof = document.getElementById('hero-proof-text');
+    if (proof) {
+        const n = Array.isArray(roles) ? roles.length : 0;
+        proof.textContent = (n ? n : '5') + ' roles · mixed · easy · medium · hard · JD-aware';
+    }
 }
 
 // select (not start) a role; the START button begins the session
@@ -231,8 +236,6 @@ function initJdInput() {
             updateStartButton();
         });
     }
-    const analyzeBtn = document.getElementById('analyze-jd-btn');
-    if (analyzeBtn) analyzeBtn.classList.add('analyze-btn');
 }
 
 // surface AI availability so the JD flow never silently pretends to match
@@ -246,8 +249,15 @@ async function checkAiMode() {
     }
     const note = document.getElementById('ai-mode-note');
     if (note && !aiOnline) {
-        note.textContent = 'AI OFFLINE - JD-MATCHED QUESTIONS WILL FALL BACK TO THE PRACTICE BANK.';
+        note.textContent = 'AI offline — JD-matched questions will fall back to the practice bank.';
         note.classList.remove('hidden');
+    }
+    const navStatus = document.getElementById('nav-status-text');
+    if (navStatus) navStatus.textContent = aiOnline ? 'AI online' : 'AI offline';
+    const dot = document.querySelector('.site-nav .status-dot');
+    if (dot) {
+        dot.classList.toggle('online', aiOnline);
+        dot.style.background = aiOnline ? 'var(--accent)' : 'var(--muted)';
     }
     const jdEl = document.getElementById('jd-text');
     if (jdEl && jdEl.value.trim()) {
@@ -300,6 +310,67 @@ function initReveal () {
     elemnts.forEach(el => observer.observe(el));
 }
 
+function maybeShowTour() {
+    try {
+        if (localStorage.getItem('arbeithelp_tour_seen_v1')) return;
+    } catch { return; }
+    const root = document.getElementById('tour-root');
+    if (!root) return;
+    const card = document.createElement('div');
+    card.className = 'tour-card';
+    card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-label', 'Quick tour');
+    const head = document.createElement('div');
+    head.className = 'tour-head';
+    const title = document.createElement('div');
+    title.className = 'tour-title';
+    title.textContent = 'Quick tour — 30 seconds';
+    const close = document.createElement('button');
+    close.className = 'tour-close';
+    close.setAttribute('aria-label', 'Dismiss tour');
+    close.textContent = '×';
+    close.onclick = () => { card.remove(); try { localStorage.setItem('arbeithelp_tour_seen_v1','1'); } catch {} };
+    head.appendChild(title);
+    head.appendChild(close);
+    const steps = document.createElement('div');
+    steps.className = 'tour-steps';
+    [
+        ['1', 'Pick a role & difficulty, paste a JD if you have one.'],
+        ['2', 'Get graded 0–3 — a hint caps that question at 2/3.'],
+        ['3', 'See your recap and copy it — stats are all-time.'],
+    ].forEach(([n, t]) => {
+        const row = document.createElement('div');
+        row.className = 'tour-step';
+        const num = document.createElement('span');
+        num.className = 'tour-num';
+        num.textContent = n;
+        const txt = document.createElement('span');
+        txt.textContent = t;
+        row.appendChild(num);
+        row.appendChild(txt);
+        steps.appendChild(row);
+    });
+    const actions = document.createElement('div');
+    actions.className = 'tour-actions';
+    const prog = document.createElement('span');
+    prog.className = 'tour-progress';
+    prog.textContent = 'Shows once';
+    const btn = document.createElement('button');
+    btn.className = 'btn-primary';
+    btn.style.padding = '8px 14px';
+    btn.style.fontSize = '0.82rem';
+    btn.textContent = 'Got it';
+    btn.onclick = () => { card.remove(); try { localStorage.setItem('arbeithelp_tour_seen_v1','1'); } catch {} };
+    actions.appendChild(prog);
+    actions.appendChild(btn);
+    card.appendChild(head);
+    card.appendChild(steps);
+    card.appendChild(actions);
+    root.appendChild(card);
+    const onKey = (e) => { if (e.key === 'Escape') { card.remove(); try { localStorage.setItem('arbeithelp_tour_seen_v1','1'); } catch {} window.removeEventListener('keydown', onKey); } };
+    window.addEventListener('keydown', onKey);
+}
+
 // --boot---
 async function init() {
     authToken = await initAuth();
@@ -309,6 +380,7 @@ async function init() {
     updateStartButton();
     runTypewriting();
     initReveal();
+    setTimeout(maybeShowTour, 700);
 }
 
 if (document.readyState === 'loading') {

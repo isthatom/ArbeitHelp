@@ -17,6 +17,7 @@ from ai_teacher import ai_correct, ai_extract_jd, ai_generate_question, ai_grade
 from config import (
     AI_ENABLED,
     AI_MODEL,
+    AI_PROVIDER,
     CONSTRAINT_SIGNALS,
     DB_PATH,
     EASY_MAX_WORDS,
@@ -120,6 +121,7 @@ def _migrate_db():
             "model_answer": "TEXT",
             "hint": "TEXT",
             "hint_used": "INTEGER NOT NULL DEFAULT 0",
+            "elapsed_seconds": "INTEGER",
         }
         for column_name, ddl in columns_to_add.items():
             if column_name not in existing_columns:
@@ -615,6 +617,7 @@ def _session_summary(session_id):
                 "question_source_label": _question_source_label(a["question_source"]),
                 "topic": a["question_topic"],
                 "difficulty": a["question_difficulty"],
+                "elapsed_seconds": a["elapsed_seconds"] if "elapsed_seconds" in a.keys() else None,
             }
             for a in attempts
         ],
@@ -795,7 +798,15 @@ def session_question():
     )
 
 
-def _grade_and_store(session, answer, skipped=False, question_text=None):
+def _grade_and_store(session, answer, skipped=False, question_text=None, elapsed_seconds=None):
+    # normalize elapsed
+    if elapsed_seconds is not None:
+        try:
+            elapsed_seconds = int(elapsed_seconds)
+            if elapsed_seconds < 0: elapsed_seconds = 0
+            if elapsed_seconds > 7200: elapsed_seconds = 7200
+        except (TypeError, ValueError):
+            elapsed_seconds = None
     pool = _questions_for_role(session["role"])
     attempts = _session_attempts(session["id"])
     current = attempts[-1] if attempts else None
@@ -828,10 +839,16 @@ def _grade_and_store(session, answer, skipped=False, question_text=None):
     meta = next((q for q in pool if q["q"] == question_text), {})
     if skipped:
         with _db() as conn:
-            conn.execute(
-                "UPDATE attempts SET skipped = 1, answer = NULL, grader = 'skipped', ai_used = 0, fallback_reason = NULL WHERE session_id = ? AND question_index = ?",
-                (session["id"], current["question_index"]),
-            )
+            if elapsed_seconds is not None:
+                conn.execute(
+                    "UPDATE attempts SET skipped = 1, answer = NULL, grader = 'skipped', ai_used = 0, fallback_reason = NULL, elapsed_seconds = ? WHERE session_id = ? AND question_index = ?",
+                    (elapsed_seconds, session["id"], current["question_index"]),
+                )
+            else:
+                conn.execute(
+                    "UPDATE attempts SET skipped = 1, answer = NULL, grader = 'skipped', ai_used = 0, fallback_reason = NULL WHERE session_id = ? AND question_index = ?",
+                    (session["id"], current["question_index"]),
+                )
             _advance_session(conn, session["id"], skipped=True)
         session_state = _session_progress(session["id"])
         return {
@@ -863,24 +880,45 @@ def _grade_and_store(session, answer, skipped=False, question_text=None):
         hint_capped = True
 
     with _db() as conn:
-        conn.execute(
-            """
-            UPDATE attempts
-            SET answer = ?, points = ?, feedback = ?, breakdown = ?, grader = ?, ai_used = ?, fallback_reason = ?
-            WHERE session_id = ? AND question_index = ?
-            """,
-            (
-                answer,
-                points,
-                feedback,
-                breakdown,
-                grader,
-                1 if ai_used else 0,
-                fallback_reason,
-                session["id"],
-                current["question_index"],
-            ),
-        )
+        if elapsed_seconds is not None:
+            conn.execute(
+                """
+                UPDATE attempts
+                SET answer = ?, points = ?, feedback = ?, breakdown = ?, grader = ?, ai_used = ?, fallback_reason = ?, elapsed_seconds = ?
+                WHERE session_id = ? AND question_index = ?
+                """,
+                (
+                    answer,
+                    points,
+                    feedback,
+                    breakdown,
+                    grader,
+                    1 if ai_used else 0,
+                    fallback_reason,
+                    elapsed_seconds,
+                    session["id"],
+                    current["question_index"],
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE attempts
+                SET answer = ?, points = ?, feedback = ?, breakdown = ?, grader = ?, ai_used = ?, fallback_reason = ?
+                WHERE session_id = ? AND question_index = ?
+                """,
+                (
+                    answer,
+                    points,
+                    feedback,
+                    breakdown,
+                    grader,
+                    1 if ai_used else 0,
+                    fallback_reason,
+                    session["id"],
+                    current["question_index"],
+                ),
+            )
         finalized = _advance_session(conn, session["id"])
 
     session_state = _session_progress(session["id"])
@@ -915,7 +953,7 @@ def session_submit():
         _finalize_session(session["id"])
         return jsonify({"error": "session complete", "completed": True, "summary": _session_summary(session["id"])}), 409
     data = request.get_json(silent=True) or {}
-    result, err = _grade_and_store(session, data.get("answer", ""))
+    result, err = _grade_and_store(session, data.get("answer", ""), elapsed_seconds=data.get("elapsed_seconds"))
     if err:
         return err
     return jsonify(result)
@@ -926,7 +964,8 @@ def session_skip():
     session, err = _require_session()
     if err:
         return err
-    result, err = _grade_and_store(session, "", skipped=True)
+    data = request.get_json(silent=True) or {}
+    result, err = _grade_and_store(session, "", skipped=True, elapsed_seconds=data.get("elapsed_seconds"))
     if err:
         return err
     return jsonify(result)
@@ -1254,7 +1293,7 @@ def health():
         {
             "status": "running",
             "ai_enabled": AI_ENABLED,
-            "provider": "groq",
+            "provider": AI_PROVIDER,
             "model": AI_MODEL if AI_ENABLED else None,
             "prompt_version": "v1.0",
             "question_prompt_version": "v1.0_question_generator",
