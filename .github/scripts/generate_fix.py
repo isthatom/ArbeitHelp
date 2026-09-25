@@ -68,10 +68,19 @@ def main():
         "temperature": 0.2,
     }).encode("utf-8")
 
+    # Safe diagnostics: model + key shape only, never the key itself.
+    print("groq model={} timeout={}s key_len={} key_prefix={}***".format(
+        MODEL, TIMEOUT, len(api_key), api_key[:4]))
+
     req = urllib.request.Request(
         API_URL,
         data=payload,
-        headers={"Content-Type": "application/json", "Authorization": "Bearer " + api_key},
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "ArbeitHelp-phase2-agent",
+            "Authorization": "Bearer " + api_key,
+        },
         method="POST",
     )
     try:
