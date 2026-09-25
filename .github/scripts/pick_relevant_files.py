@@ -1,16 +1,19 @@
 """Phase 2 relevance picker: map issue text to a capped set of repo files.
 
 Reads ISSUE_TITLE / ISSUE_BODY from env (or --title/--body), scores a
-keyword -> files map, writes combined context to --out (default /tmp/context.txt),
+keyword -> files map with an exact-filename boost for files named in the
+issue text, writes combined context to --out (default /tmp/context.txt),
 and appends RELEVANT_FILES to $GITHUB_OUTPUT when present. Stdlib only.
 """
 import argparse
 import os
+import re
 import sys
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parents[2]
-MAX_TOTAL_CHARS = 12_000
+MAX_TOTAL_CHARS = 20_000
+PER_FILE_CHARS = 6_000
 
 # (keywords, files) — ordered by specificity; keep small, never whole repo.
 RULES = [
@@ -25,47 +28,92 @@ RULES = [
 FALLBACK_FILES = ["app.py", "config.py"]
 
 
+def known_files():
+    seen = []
+    for _, files in RULES:
+        for f in files:
+            if f not in seen:
+                seen.append(f)
+    return seen
+
+
+def filename_hits(text):
+    """Repo files explicitly named in the issue text, most-specific first.
+
+    Matches full relative paths (static/questions.js) or bare basenames
+    (questions.js) as standalone tokens. These outrank keyword scores so a
+    file named in the title can never be starved by the char budget.
+    """
+    lowered = text.lower()
+    hits = []
+    for rel in known_files():
+        base = rel.rsplit("/", 1)[-1].lower()
+        if rel.lower() in lowered:
+            hits.append(rel)
+        elif re.search(r"(?<![\w./-])" + re.escape(base) + r"(?![\w.-])", lowered):
+            hits.append(rel)
+    return sorted(set(hits), key=lambda r: (-len(r), r))
+
+
 def score_files(text):
-    text = text.lower()
+    lowered = text.lower()
     scores = {}
     for keywords, files in RULES:
-        hits = sum(1 for k in keywords if k in text)
+        hits = sum(1 for k in keywords if k in lowered)
         if hits:
             for f in files:
                 scores[f] = scores.get(f, 0) + hits
-    if not scores:
+    ranked_kw = [f for f, _ in sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))]
+    named = filename_hits(text)
+    if not ranked_kw and not named:
         return list(FALLBACK_FILES)
-    ranked = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
-    return [f for f, _ in ranked]
+    named_set = set(named)
+    return named + [f for f in ranked_kw if f not in named_set]
 
 
 def build_context(files):
     parts = []
     total = 0
     used = []
+    skipped = []
+    existing = []
     for rel in files:
         p = BASE / rel
         if not p.is_file():
             continue
         try:
-            content = p.read_text(encoding="utf-8")
+            size = p.stat().st_size
         except OSError:
             continue
+        existing.append((rel, size))
+    for i, (rel, size) in enumerate(existing):
+        try:
+            content = (BASE / rel).read_text(encoding="utf-8")
+        except OSError:
+            skipped.append("{} (unreadable)".format(rel))
+            continue
         # Per-file cap so one big file (app.py) can't eat the budget.
-        if len(content) > 8_000:
-            content = content[:8_000] + "\n... [truncated]\n"
+        if len(content) > PER_FILE_CHARS:
+            content = content[:PER_FILE_CHARS] + "\n... [truncated]\n"
         if total + len(content) > MAX_TOTAL_CHARS:
             remaining = MAX_TOTAL_CHARS - total
             if remaining > 500:
                 parts.append("===== FILE: {} (truncated) =====\n".format(rel) + content[:remaining])
                 used.append(rel)
+                total += remaining
+            else:
+                skipped.append("{} ({} chars, budget exhausted)".format(rel, size))
+            for rel2, size2 in existing[i + 1:]:
+                skipped.append("{} ({} chars, budget exhausted)".format(rel2, size2))
             break
         parts.append("===== FILE: {} =====\n".format(rel) + content)
         used.append(rel)
         total += len(content)
         if total >= MAX_TOTAL_CHARS:
+            for rel2, size2 in existing[i + 1:]:
+                skipped.append("{} ({} chars, budget exhausted)".format(rel2, size2))
             break
-    return used, "\n".join(parts)
+    return used, skipped, "\n".join(parts)
 
 
 def main():
@@ -76,12 +124,14 @@ def main():
     args = ap.parse_args()
 
     ranked = score_files(args.title + "\n" + args.body)
-    used, context = build_context(ranked)
+    used, skipped, context = build_context(ranked)
     Path(args.out).write_text(context, encoding="utf-8")
 
     line = "RELEVANT_FILES=" + ",".join(used)
-    print(line)
-    print("context_chars={} out={}".format(len(context), args.out))
+    print(line, flush=True)
+    print("context_chars={} files_used={} out={}".format(len(context), len(used), args.out), flush=True)
+    if skipped:
+        print("SKIPPED_FILES=" + ";".join(skipped), flush=True)
     gh_out = os.getenv("GITHUB_OUTPUT")
     if gh_out:
         with open(gh_out, "a", encoding="utf-8") as fh:
