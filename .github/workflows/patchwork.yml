@@ -1,0 +1,35 @@
+name: patchwork-phase1
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  plumbing:
+    if: github.event.label.name == 'agent-ok'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Configure bot identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name
+          git config user.email
+
+      - name: Log issue context
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          echo "Issue number: $ISSUE_NUMBER"
+          echo "Issue title: $ISSUE_TITLE"
+          echo "Issue body:"
+          echo "$ISSUE_BODY"
