@@ -33,3 +33,36 @@ jobs:
           echo "Issue title: $ISSUE_TITLE"
           echo "Issue body:"
           echo "$ISSUE_BODY"
+          printf '%s' "$ISSUE_TITLE" > /tmp/issue_title.txt
+          printf '%s' "$ISSUE_BODY" > /tmp/issue_body.txt
+
+      - name: Pick relevant files
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          python .github/scripts/pick_relevant_files.py --out /tmp/context.txt
+
+      - name: Generate fix diff (read-only, no push)
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_MODEL: openai/gpt-oss-120b
+          AI_TIMEOUT: "30"
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          python .github/scripts/generate_fix.py "$ISSUE_NUMBER" /tmp/issue_title.txt /tmp/issue_body.txt /tmp/context.txt /tmp/fix.diff
+          echo "--- fix.diff stats ---"
+          wc -c /tmp/fix.diff
+
+      - name: Apply to local branch and print diff
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          git checkout -B "agent/fix-$ISSUE_NUMBER"
+          git apply --check /tmp/fix.diff
+          git apply /tmp/fix.diff
+          echo "===== FULL DIFF FOR MANUAL REVIEW (local branch only, nothing pushed) ====="
+          git diff
+          echo "===== STATUS ====="
+          git status --short
+          echo "Branch $(git branch --show-current) left local in runner. No push performed."
