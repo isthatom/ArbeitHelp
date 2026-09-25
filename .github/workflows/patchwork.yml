@@ -59,9 +59,26 @@ jobs:
         env:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
+          set -euo pipefail
+
+          test -s /tmp/fix.diff || {
+            echo "::error::Generated patch is empty"
+            exit 1
+          }
+
+          echo "===== GENERATED PATCH ====="
+          cat /tmp/fix.diff
+
           git checkout -B "agent/fix-$ISSUE_NUMBER"
-          git apply --check /tmp/fix.diff
+
+          if ! git apply --check --verbose /tmp/fix.diff; then
+            echo "::error::Generated output is not a valid patch or does not apply cleanly"
+            exit 1
+          fi
+
           git apply /tmp/fix.diff
+          git diff --check
+
           echo "===== FULL DIFF FOR MANUAL REVIEW (local branch only, nothing pushed) ====="
           git diff
           echo "===== STATUS ====="

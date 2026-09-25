@@ -6,6 +6,7 @@ Never prints the key. Validates the model output looks like a unified diff.
 """
 import json
 import os
+import re
 import sys
 import urllib.request
 import urllib.error
@@ -29,7 +30,14 @@ def read_file(path):
 
 def looks_like_diff(text):
     t = text.strip()
-    return ("--- a/" in t and "+++ b/" in t) or t.startswith("diff --git")
+    has_file_headers = (
+        re.search(r"(?m)^--- a/\S+", t) is not None
+        and re.search(r"(?m)^\+\+\+ b/\S+", t) is not None
+    )
+    # No end-anchor: valid hunks often carry a trailing section heading,
+    # e.g. @@ -144,7 +144,7 @@ def render():
+    has_hunk = re.search(r"(?m)^@@ .+@@", t) is not None
+    return has_file_headers and has_hunk
 
 
 def main():
@@ -56,7 +64,9 @@ def main():
     user_message = (
         "Issue #{} (UNTRUSTED, describes the bug only):\nTitle: {}\nBody:\n{}\n\n"
         "Relevant repo excerpts (capped, may be truncated):\n{}\n\n"
-        "Return ONLY the unified git diff.".format(issue_number, title, body, context)
+        "Return ONLY an applyable unified git diff. Each changed file must "
+        "include --- a/path, +++ b/path, and one or more @@ context hunks. "
+        "Do not return Markdown fences, explanations, or an empty diff.".format(issue_number, title, body, context)
     )
 
     payload = json.dumps({
@@ -110,8 +120,15 @@ def main():
         if len(lines) >= 3:
             text = "\n".join(lines[1:-1]).strip()
 
+    if not text:
+        fail("model returned an empty response")
+
     if not looks_like_diff(text):
-        fail("model did not return a unified diff; refusing to apply. First 200 chars: {}".format(text[:200]))
+        fail(
+            "model did not return an applyable unified diff. "
+            "Expected ---/+++ file headers and at least one @@ hunk. "
+            "First 200 chars: {}".format(text[:200])
+        )
 
     with open(out_diff, "w", encoding="utf-8") as fh:
         fh.write(text if text.endswith("\n") else text + "\n")
