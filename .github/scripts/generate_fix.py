@@ -24,6 +24,19 @@ def fail(msg):
     raise SystemExit(1)
 
 
+LOG_CANDIDATE_LIMIT = 4000
+
+
+def log_candidate(tag, candidate):
+    """Print rejected model output to the Action log for manual review."""
+    shown = candidate
+    if len(shown) > LOG_CANDIDATE_LIMIT:
+        shown = shown[:LOG_CANDIDATE_LIMIT] + "\n... [truncated {} chars] ...".format(
+            len(candidate) - LOG_CANDIDATE_LIMIT)
+    print("===== {} (rejected, for manual review) =====".format(tag), flush=True)
+    print(shown, flush=True)
+
+
 def read_file(path):
     with open(path, "r", encoding="utf-8") as fh:
         return fh.read()
@@ -96,7 +109,7 @@ def main():
 
     # Safe diagnostics: model + key shape only, never the key itself.
     print("groq model={} timeout={}s key_len={} key_prefix={}***".format(
-        MODEL, TIMEOUT, len(api_key), api_key[:4]))
+        MODEL, TIMEOUT, len(api_key), api_key[:4]), flush=True)
 
     req = urllib.request.Request(
         API_URL,
@@ -140,6 +153,7 @@ def main():
         fail("model returned an empty response")
 
     if not looks_like_diff(text):
+        log_candidate("REJECTED OUTPUT", text)
         fail(
             "model did not return an applyable unified diff. "
             "Expected ---/+++ file headers and at least one @@ hunk. "
@@ -161,6 +175,7 @@ def main():
         )
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or exc.stdout or "").strip()
+        log_candidate("REJECTED PATCH", candidate)
         fail("generated diff does not apply cleanly: {}".format(detail[:500]))
 
     with open(out_diff, "w", encoding="utf-8") as fh:
