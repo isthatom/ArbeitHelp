@@ -50,6 +50,7 @@ jobs:
           AI_TIMEOUT: "30"
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
+          test -n "$GROQ_API_KEY" || { echo "ERROR: GROQ_API_KEY secret is missing (Repository secret, not Environment). Add it under Settings > Secrets and variables > Actions, then re-label the issue."; exit 1; }
           python .github/scripts/generate_fix.py "$ISSUE_NUMBER" /tmp/issue_title.txt /tmp/issue_body.txt /tmp/context.txt /tmp/fix.diff
           echo "--- fix.diff stats ---"
           wc -c /tmp/fix.diff
