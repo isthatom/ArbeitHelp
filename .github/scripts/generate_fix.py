@@ -79,7 +79,10 @@ def main():
         "+added line\n"
         "The @@ hunk header MUST contain numeric old and new line ranges; "
         "a bare '@@' is invalid. "
-        "Use repository-relative paths and include enough context for git apply.".format(issue_number, title, body, context)
+        "Use repository-relative paths and include enough context for git apply.\n"
+        "Base the diff ONLY on the provided excerpts. Do not invent file content, "
+        "line numbers, or context lines; hunk headers and context must match "
+        "the excerpts exactly.".format(issue_number, title, body, context)
     )
 
     payload = json.dumps({
