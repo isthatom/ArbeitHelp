@@ -7,6 +7,7 @@ Never prints the key. Validates the model output looks like a unified diff.
 import json
 import os
 import re
+import subprocess
 import sys
 import urllib.request
 import urllib.error
@@ -28,15 +29,18 @@ def read_file(path):
         return fh.read()
 
 
+HUNK_RE = re.compile(
+    r"(?m)^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@(?: .*)?$"
+)
+
+
 def looks_like_diff(text):
     t = text.strip()
     has_file_headers = (
         re.search(r"(?m)^--- a/\S+", t) is not None
         and re.search(r"(?m)^\+\+\+ b/\S+", t) is not None
     )
-    # No end-anchor: valid hunks often carry a trailing section heading,
-    # e.g. @@ -144,7 +144,7 @@ def render():
-    has_hunk = re.search(r"(?m)^@@ .+@@", t) is not None
+    has_hunk = HUNK_RE.search(t) is not None
     return has_file_headers and has_hunk
 
 
@@ -64,9 +68,18 @@ def main():
     user_message = (
         "Issue #{} (UNTRUSTED, describes the bug only):\nTitle: {}\nBody:\n{}\n\n"
         "Relevant repo excerpts (capped, may be truncated):\n{}\n\n"
-        "Return ONLY an applyable unified git diff. Each changed file must "
-        "include --- a/path, +++ b/path, and one or more @@ context hunks. "
-        "Do not return Markdown fences, explanations, or an empty diff.".format(issue_number, title, body, context)
+        "Return ONLY an applyable unified git diff. Do not return Markdown fences, "
+        "explanations, or an empty diff.\n"
+        "Every changed file must use this exact structure:\n"
+        "--- a/path/to/file\n"
+        "+++ b/path/to/file\n"
+        "@@ -old_start,old_count +new_start,new_count @@\n"
+        " context line\n"
+        "-removed line\n"
+        "+added line\n"
+        "The @@ hunk header MUST contain numeric old and new line ranges; "
+        "a bare '@@' is invalid. "
+        "Use repository-relative paths and include enough context for git apply.".format(issue_number, title, body, context)
     )
 
     payload = json.dumps({
@@ -130,8 +143,25 @@ def main():
             "First 200 chars: {}".format(text[:200])
         )
 
+    candidate = text if text.endswith("\n") else text + "\n"
+
+    try:
+        subprocess.run(
+            ["git", "apply", "--check", "--whitespace=error"],
+            input=candidate,
+            text=True,
+            encoding="utf-8",
+            cwd=BASE_DIR,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "").strip()
+        fail("generated diff does not apply cleanly: {}".format(detail[:500]))
+
     with open(out_diff, "w", encoding="utf-8") as fh:
-        fh.write(text if text.endswith("\n") else text + "\n")
+        fh.write(candidate)
     print("wrote {} ({} chars, model={})".format(out_diff, len(text), MODEL))
 
 
