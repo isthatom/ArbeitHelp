@@ -75,6 +75,9 @@ ArbeitHelp is a free, open-source web app that helps you practice for job interv
 
 ## Getting started
 
+Build an upload package with `python scripts/build_deployment.py`.
+The ZIP excludes local secrets, databases, and development files.
+
 ### Prerequisites
 
 - Python 3.12+
@@ -204,7 +207,7 @@ Once you finish a session, ArbeitHelp shows all-time trends: total answered, ave
 | `GET`  | `/stats/unlock-status`, `/stats/summary`, `/stats/chart-data`, `/stats/export/*`         | Locked until 1 answered; charts + PDF/JSON                                                             |
 | `GET`  | `/health`, `/roles`                                                                          | Health includes`ai_enabled`, `provider`, model, prompt versions, roles, totals                     |
 
-Full route contracts in `app.py:627-1317`.
+Full route contracts are defined in `app.py` and covered by `tests/test_routes.py`.
 
 ## Roadmap ideas
 

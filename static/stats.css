@@ -116,7 +116,6 @@
     min-height: 44vh; text-align: center; background: var(--surface); border: 1px solid var(--line);
     border-radius: var(--r-lg); padding: 40px 28px; max-width: 520px; width: calc(100% - 32px); margin: 40px auto; box-shadow: var(--shadow-card);
 }
-.lock-screen.hidden { display: none; }
 .lock-screen h2 { font-family: 'Fraunces', serif; font-weight: 800; font-size: 1.25rem; letter-spacing: -0.02em; margin-bottom: 10px; }
 .lock-screen p { font-size: 0.95rem; color: var(--ink-soft); margin: 6px 0; }
 .lock-screen p span { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; font-weight: 600; color: var(--accent); }

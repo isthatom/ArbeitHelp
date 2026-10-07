@@ -24,6 +24,43 @@ _threshold = 5
 _cooldown = 60
 
 
+def _ai_circuit_open():
+    global _fail_count, _circuit_open_until
+    now = time.time()
+    if _circuit_open_until:
+        if now < _circuit_open_until:
+            return True
+        # Permit another provider request after the cooldown has elapsed.
+        _fail_count = 0
+        _circuit_open_until = 0
+    if _fail_count >= _threshold:
+        _circuit_open_until = now + _cooldown
+        return True
+    return False
+
+
+def _record_ai_failure():
+    global _fail_count, _circuit_open_until
+    _fail_count += 1
+    if _fail_count >= _threshold:
+        _circuit_open_until = time.time() + _cooldown
+
+
+def _ai_error_code(exc):
+    """Return a public error category without exposing provider response text."""
+    detail = str(exc)
+    for status, code in ((401, "invalid_key"), (403, "access_denied"), (429, "rate_limited")):
+        if detail.startswith(f"groq_http_error:{status}:"):
+            return code
+    if detail.startswith("groq_network_error:"):
+        return "network_error"
+    if detail.startswith("groq_timeout:"):
+        return "timeout"
+    if detail.startswith("groq_http_error:"):
+        return "provider_error"
+    return "invalid_response"
+
+
 def load_system_prompt() -> str:
     if PROMPT_PATH.exists():
         return PROMPT_PATH.read_text(encoding="utf-8").strip()
@@ -122,6 +159,7 @@ _executor = ThreadPoolExecutor(max_workers=4)
 
 
 def _invoke_ai(messages, system_prompt, expected_tokens_out=900):
+    api_key = os.getenv("GROQ_API_KEY", "").strip()
     payload = {
         "model": AI_MODEL,
         "messages": [{"role": "system", "content": system_prompt}, *messages],
@@ -134,7 +172,7 @@ def _invoke_ai(messages, system_prompt, expected_tokens_out=900):
         "https://api.groq.com/openai/v1/chat/completions",
         data=json.dumps(payload).encode("utf-8"),
         headers={
-            "Authorization": f"Bearer {os.getenv('GROQ_API_KEY')}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "Accept": "application/json",
             "User-Agent": "ArbeitHelp/1.0",
@@ -225,8 +263,7 @@ def ai_generate_question(role, question_number, session_context, session_length=
     if not AI_ENABLED or not os.getenv("GROQ_API_KEY") or not _model_supported_or_fail():
         return None
 
-    if _circuit_open_until > time.time() or _fail_count >= _threshold:
-        _circuit_open_until = time.time() + _cooldown
+    if _ai_circuit_open():
         return None
 
     try:
@@ -267,7 +304,7 @@ def ai_generate_question(role, question_number, session_context, session_length=
             },
         }
     except Exception as exc:
-        _fail_count += 1
+        _record_ai_failure()
         logger.exception("AI question generation failed: %s", exc)
         return None
 
@@ -299,8 +336,7 @@ def ai_model_answer(role, question, meta):
     if not AI_ENABLED or not os.getenv("GROQ_API_KEY") or not _model_supported_or_fail():
         return {"model_answer": _fallback_model_answer(role, question, meta), "ai_used": False, "fallback_reason": "ai_unavailable"}
 
-    if _circuit_open_until > time.time() or _fail_count >= _threshold:
-        _circuit_open_until = time.time() + _cooldown
+    if _ai_circuit_open():
         return {"model_answer": _fallback_model_answer(role, question, meta), "ai_used": False, "fallback_reason": "ai_unavailable"}
 
     try:
@@ -329,7 +365,7 @@ def ai_model_answer(role, question, meta):
             },
         }
     except Exception as exc:
-        _fail_count += 1
+        _record_ai_failure()
         logger.exception("AI model answer failed: %s", exc)
         return {"model_answer": _fallback_model_answer(role, question, meta), "ai_used": False, "fallback_reason": "ai_error"}
 
@@ -359,8 +395,7 @@ def ai_hint(role, question, meta):
     if not AI_ENABLED or not os.getenv("GROQ_API_KEY") or not _model_supported_or_fail():
         return {"hint": _fallback_hint(meta), "ai_used": False, "fallback_reason": "ai_unavailable"}
 
-    if _circuit_open_until > time.time() or _fail_count >= _threshold:
-        _circuit_open_until = time.time() + _cooldown
+    if _ai_circuit_open():
         return {"hint": _fallback_hint(meta), "ai_used": False, "fallback_reason": "ai_unavailable"}
 
     try:
@@ -393,7 +428,7 @@ def ai_hint(role, question, meta):
             },
         }
     except Exception as exc:
-        _fail_count += 1
+        _record_ai_failure()
         logger.exception("AI hint failed: %s", exc)
         return {"hint": _fallback_hint(meta), "ai_used": False, "fallback_reason": "ai_error"}
 
@@ -418,7 +453,8 @@ def _jd_string_list(value, cap=12):
 
 
 def _validate_jd(result):
-    seniority = str(result.get("seniority", "")).strip().lower()[:40]
+    seniority = result.get("seniority", "")
+    seniority = seniority.strip().lower()[:40] if isinstance(seniority, str) else ""
     return {
         "skills": _jd_string_list(result.get("skills")),
         "tools": _jd_string_list(result.get("tools")),
@@ -440,8 +476,7 @@ def ai_extract_jd(jd_text):
     if not AI_ENABLED or not os.getenv("GROQ_API_KEY") or not _model_supported_or_fail():
         return {**_empty_jd(), "ai_used": False, "fallback_reason": "ai_unavailable"}
 
-    if _circuit_open_until > time.time() or _fail_count >= _threshold:
-        _circuit_open_until = time.time() + _cooldown
+    if _ai_circuit_open():
         return {**_empty_jd(), "ai_used": False, "fallback_reason": "ai_unavailable"}
 
     try:
@@ -454,9 +489,9 @@ def ai_extract_jd(jd_text):
         latency_ms = int((time.time() - start) * 1000)
         text = _extract_text(resp)
         result = json.loads(text)
+        if not isinstance(result, dict) or not set(_empty_jd()).issubset(result):
+            raise ValueError("invalid JD extraction response")
         validated = _validate_jd(result)
-        if not (validated["skills"] or validated["tools"] or validated["focus_areas"] or validated["seniority"]):
-            raise ValueError("empty JD extraction response")
 
         tokens_in, tokens_out = _extract_usage(resp)
         _fail_count = 0
@@ -474,9 +509,9 @@ def ai_extract_jd(jd_text):
             },
         }
     except Exception as exc:
-        _fail_count += 1
+        _record_ai_failure()
         logger.exception("AI JD extraction failed: %s", exc)
-        return {**_empty_jd(), "ai_used": False, "fallback_reason": "ai_error"}
+        return {**_empty_jd(), "ai_used": False, "fallback_reason": "ai_error", "ai_error_code": _ai_error_code(exc)}
 
 
 def ai_grade(role, question, answer, meta):
@@ -484,8 +519,7 @@ def ai_grade(role, question, answer, meta):
     if not AI_ENABLED or not os.getenv("GROQ_API_KEY") or not _model_supported_or_fail():
         return _fallback_grade(role, question, answer, meta)
 
-    if _circuit_open_until > time.time() or _fail_count >= _threshold:
-        _circuit_open_until = time.time() + _cooldown
+    if _ai_circuit_open():
         return _fallback_grade(role, question, answer, meta)
 
     try:
@@ -517,7 +551,7 @@ def ai_grade(role, question, answer, meta):
             },
         }
     except Exception as exc:
-        _fail_count += 1
+        _record_ai_failure()
         logger.exception("AI grading failed: %s", exc)
         return _fallback_grade(role, question, answer, meta) | {"fallback_reason": "ai_error"}
 
@@ -527,8 +561,7 @@ def ai_correct(role, question, answer, meta, feedback):
     if not AI_ENABLED or not os.getenv("GROQ_API_KEY") or not _model_supported_or_fail():
         return _fallback_correct(role, question, answer, meta, feedback)
 
-    if _circuit_open_until > time.time() or _fail_count >= _threshold:
-        _circuit_open_until = time.time() + _cooldown
+    if _ai_circuit_open():
         return _fallback_correct(role, question, answer, meta, feedback)
 
     try:
@@ -558,6 +591,6 @@ def ai_correct(role, question, answer, meta, feedback):
             },
         }
     except Exception as exc:
-        _fail_count += 1
+        _record_ai_failure()
         logger.exception("AI correction failed: %s", exc)
         return _fallback_correct(role, question, answer, meta, feedback) | {"fallback_reason": "ai_error"}

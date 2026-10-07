@@ -688,6 +688,7 @@ def jd_preview():
         "signals": signals,
         "ai_used": bool(result.get("ai_used")),
         "fallback_reason": result.get("fallback_reason"),
+        "ai_error_code": result.get("ai_error_code"),
     })
 
 
@@ -1263,23 +1264,33 @@ def export_pdf():
     except ImportError:
         return jsonify({"error": "PDF generation not available"}), 503
     sessions, attempts = _user_sessions_attempts(user_id)
+    # Built-in Helvetica supports Latin-1. Normalize common AI punctuation and
+    # replace unsupported characters so Unicode responses still export.
+    def pdf_text(value):
+        replacements = str.maketrans({
+            "\u2013": "-", "\u2014": "-", "\u2018": "'", "\u2019": "'",
+            "\u201c": '"', "\u201d": '"', "\u2026": "...", "\u2022": "-",
+            "\u20ac": "EUR",
+        })
+        return str(value).translate(replacements).encode("latin-1", errors="replace").decode("latin-1")
+
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 18)
-    pdf.cell(0, 12, "ArbietHelp - Interview Report", ln=1, align="C")
+    pdf.cell(0, 12, "ArbietHelp - Interview Report", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.set_font("Helvetica", "", 11)
-    pdf.cell(0, 8, f"User: {user_id}", ln=1, align="C")
-    pdf.cell(0, 8, f"Generated: {_utcnow().strftime('%Y-%m-%d %H:%M UTC')}", ln=1, align="C")
+    pdf.cell(0, 8, pdf_text(f"User: {user_id}"), new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.cell(0, 8, f"Generated: {_utcnow().strftime('%Y-%m-%d %H:%M UTC')}", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(6)
     for i, s in enumerate(sessions, 1):
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 8, f"Session {i} - {s['role']}", ln=1)
+        pdf.cell(0, 8, pdf_text(f"Session {i} - {s['role']}"), new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("Helvetica", "", 10)
         for a in [x for x in attempts if x["session_id"] == s["id"]]:
-            pdf.multi_cell(0, 5, f"Q: {a['question_text']}")
-            pdf.multi_cell(0, 5, f"Score: {a['points'] if a['points'] is not None else '-'} | Grader: {a['grader'] or '-'}")
+            pdf.multi_cell(0, 5, pdf_text(f"Q: {a['question_text']}"), new_x="LMARGIN", new_y="NEXT")
+            pdf.multi_cell(0, 5, pdf_text(f"Score: {a['points'] if a['points'] is not None else '-'} | Grader: {a['grader'] or '-'}"), new_x="LMARGIN", new_y="NEXT")
             if a["feedback"]:
-                pdf.multi_cell(0, 5, f"Feedback: {a['feedback']}")
+                pdf.multi_cell(0, 5, pdf_text(f"Feedback: {a['feedback']}"), new_x="LMARGIN", new_y="NEXT")
             pdf.ln(2)
     buf = BytesIO()
     pdf.output(buf)

@@ -246,12 +246,28 @@ def test_stats_flow(client):
     assert len(export["sessions"]) == 1
     assert len(export["attempts"]) == 5
 
-    # PDF generation is behavior-preserving: fpdf can fail on very long
-    # question text, so accept either outcome.
     resp = client.get("/stats/export/pdf", headers=headers)
-    assert resp.status_code in (200, 500)
-    if resp.status_code == 200:
-        assert resp.content_type == "application/pdf"
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.content_type == "application/pdf"
+    assert resp.data.startswith(b"%PDF")
+
+
+def test_pdf_export_handles_unicode_and_long_questions(client):
+    import app as app_module
+
+    token = _signup(client, "pdf-unicode@test.local")
+    _complete_session(client, token)
+    with app_module._db() as conn:
+        conn.execute(
+            "UPDATE attempts SET question_text = ?, feedback = ? WHERE user_email = ?",
+            ("Describe \u2018trade-offs\u2019 \u2014 " + "longword" * 250 + " \U0001f680 \u4f60\u597d?",
+             "Use examples\u2026 Compare latency \u2264 20ms and costs of \u20ac10.",
+             "pdf-unicode@test.local"),
+        )
+    resp = client.get("/stats/export/pdf", headers=_headers(token))
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.content_type == "application/pdf"
+    assert resp.data.startswith(b"%PDF")
 
 
 def test_stats_locked(client):
@@ -334,6 +350,31 @@ def test_answer_required_on_correct(client):
     assert client.post("/session/submit", headers=headers, json={"answer": ANSWERS[0]}).status_code == 200
     assert client.post("/correct", headers=headers, json={"answer": ""}).status_code == 400
     assert client.post("/correct", headers=headers, json={"answer": ANSWERS[0]}).status_code == 200
+
+
+def test_groq_request_trims_key_whitespace(monkeypatch):
+    import ai_teacher
+
+    monkeypatch.setenv("GROQ_API_KEY", "  test-key  \n")
+    requests = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"choices": []}'
+
+    def send(request, timeout):
+        requests.append(request)
+        return Response()
+
+    monkeypatch.setattr(ai_teacher.urlrequest, "urlopen", send)
+    ai_teacher._invoke_ai([], "Test")
+    assert requests[0].get_header("Authorization") == "Bearer test-key"
 
 
 def test_question_generation_circuit_breaker(monkeypatch):
@@ -807,6 +848,80 @@ def test_jd_preview_with_ai(client, monkeypatch):
     assert data["ai_used"] is True
     assert data["signals"]["skills"] == ["process safety", "distillation"]
     assert data["signals"]["seniority"] == "mid"
+
+
+@pytest.mark.parametrize("provider_error,error_code", [
+    ("groq_http_error:401:provider-secret-detail", "invalid_key"),
+    ("groq_http_error:403:provider-secret-detail", "access_denied"),
+    ("groq_http_error:429:provider-secret-detail", "rate_limited"),
+    ("groq_network_error:provider-secret-detail", "network_error"),
+    ("groq_timeout:30s exceeded", "timeout"),
+])
+def test_jd_preview_provider_failure_has_safe_error_code(client, monkeypatch, provider_error, error_code):
+    import ai_teacher
+
+    _enable_ai(client, monkeypatch)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError(provider_error)
+
+    monkeypatch.setattr(ai_teacher, "_invoke_ai", fail)
+    token = _signup(client, f"jd-error-{error_code}@test.local")
+    resp = client.post("/jd/preview", headers=_headers(token), json={"job_description": "Hiring a Python developer."})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ai_used"] is False
+    assert data["fallback_reason"] == "ai_error"
+    assert data["ai_error_code"] == error_code
+    assert "provider-secret-detail" not in resp.get_data(as_text=True)
+
+
+def test_jd_empty_success_does_not_trip_circuit_breaker(client, monkeypatch):
+    import ai_teacher
+
+    _enable_ai(client, monkeypatch)
+    monkeypatch.setattr(ai_teacher, "_invoke_ai", lambda *args, **kwargs: {
+        "choices": [{"message": {"content": json.dumps(ai_teacher._empty_jd())}}],
+        "usage": {"prompt_tokens": 4, "completion_tokens": 6},
+    })
+    result = ai_teacher.ai_extract_jd("Hello, how are you?")
+    assert result["ai_used"] is True
+    assert result["fallback_reason"] is None
+    assert result["skills"] == []
+    assert result["_meta"]["tokens_out"] == 6
+    assert ai_teacher._fail_count == 0
+    assert ai_teacher._circuit_open_until == 0
+
+
+def test_ai_circuit_recovers_after_cooldown(client, monkeypatch):
+    import ai_teacher
+
+    _enable_ai(client, monkeypatch)
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(ai_teacher.time, "time", lambda: clock["now"])
+    calls = []
+
+    def invoke(*args, **kwargs):
+        calls.append(1)
+        if len(calls) <= ai_teacher._threshold:
+            raise RuntimeError("groq_timeout:30s exceeded")
+        return {"choices": [{"message": {"content": json.dumps({
+            "skills": ["python"], "tools": ["flask"], "seniority": "", "focus_areas": ["api design"],
+        })}}]}
+
+    monkeypatch.setattr(ai_teacher, "_invoke_ai", invoke)
+    for _ in range(ai_teacher._threshold):
+        assert ai_teacher.ai_extract_jd("Hiring a Python developer.")["ai_used"] is False
+    deadline = ai_teacher._circuit_open_until
+    clock["now"] += 20
+    assert ai_teacher.ai_extract_jd("Hiring a Python developer.")["ai_used"] is False
+    assert ai_teacher.ai_generate_question(ROLE, 1, {}) is None
+    assert ai_teacher._circuit_open_until == deadline  # failed requests cannot extend the pause
+    assert len(calls) == ai_teacher._threshold
+    clock["now"] = deadline + 1
+    assert ai_teacher.ai_extract_jd("Hiring a Python developer.")["ai_used"] is True
+    assert ai_teacher._fail_count == 0
+    assert ai_teacher._circuit_open_until == 0
 
 
 def test_custom_role_start_validation(client):

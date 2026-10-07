@@ -17,8 +17,6 @@ let authToken = null;
 let sessionToken = null;
 let sessionCompleted = false;
 let currentImproved = '';
-let currentChanges = [];
-let currentCorrectionUsesAI = false;
 let submitAbortControl = null;
 let submitTimeoutId = null;
 let isSubmitting = false;
@@ -315,8 +313,6 @@ function closeCorrection() {
     const modal = el('correction-modal');
     if (modal) modal.classList.add('hidden');
     currentImproved = '';
-    currentChanges = [];
-    currentCorrectionUsesAI = false;
     const btn = el('submit-btn');
     if (btn) {
         btn.disabled = false;
@@ -681,6 +677,8 @@ async function submitAnswer() {
         if (breakdownText) breakdownText.textContent = data.breakdown || '';
         if (scoreDisplay) scoreDisplay.textContent = `${data.points}/${data.max_points} PTS`;
         if (ratingLabel) ratingLabel.textContent = data.ai_used ? 'AI GRADE' : 'RULE GRADE';
+        const modelBtn = el('model-answer-btn');
+        if (modelBtn) modelBtn.classList.remove('hidden');
 
         applySessionState(data);
 
@@ -904,9 +902,8 @@ async function improveAnswer() {
         });
         const data = await res.json();
         currentImproved = data.improved || '';
-        currentChanges = Array.isArray(data.changes) ? data.changes : [];
-        currentCorrectionUsesAI = !!data.ai_used;
-        showCorrection(data.explanation, currentChanges, currentCorrectionUsesAI, data.fallback_reason);
+        const changes = Array.isArray(data.changes) ? data.changes : [];
+        showCorrection(data.explanation, changes, !!data.ai_used, data.fallback_reason);
         if (btn) {
             btn.disabled = false;
             btn.textContent = 'AI IMPROVE MY ANSWER';

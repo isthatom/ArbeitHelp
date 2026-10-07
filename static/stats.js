@@ -253,7 +253,6 @@ function buildCharts(d) {
             options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { display: false }, title: { display: true, text: 'Average Score by Difficulty', font: { family: 'Press Start 2P', size: 16 }}}, scales: { y: { beginAtZero: true, max: 3, ticks: { stepSize: 1, font: { family: 'VT323', size: 12 }}}, x: { ticks: { font: { family: 'VT323', size: 12 }} } } }
         });
     }
-////
     if (d.distribution) {
         var ctx4 = document.getElementById('chart-distribution').getContext('2d');
         if (distChart) distChart.destroy();

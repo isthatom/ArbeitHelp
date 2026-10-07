@@ -127,21 +127,36 @@ function renderJdPreview(panel, data) {
     const signals = data.signals || {};
     const groups = [['SKILLS', signals.skills], ['TOOLS', signals.tools], ['FOCUS', signals.focus_areas]];
     const hasSignals = groups.some(([, terms]) => Array.isArray(terms) && terms.length > 0) || !!signals.seniority;
+    const analysisFailed = data.ai_used === false && !hasSignals;
 
     const head = document.createElement('div');
     head.className = 'jd-preview-head';
     head.textContent = hasSignals
         ? (data.ai_used ? 'SIGNALS DETECTED' + (signals.seniority ? ' - LEVEL: ' + signals.seniority.toUpperCase() : '') : 'NO SIGNALS DETECTED')
-        : 'NOTHING DETECTED';
+        : (analysisFailed ? 'ANALYSIS UNAVAILABLE' : 'NOTHING DETECTED');
     panel.appendChild(head);
 
     if (!hasSignals || data.ai_used === false) {
         const note = document.createElement('p');
         note.className = 'status-line ' + (hasSignals ? 'ok' : 'warn');
-        note.textContent = hasSignals
-            ? 'ANALYSIS CACHED FROM A PREVIOUS AI RUN.'
-            : (aiOnline ? 'THE JD DID NOT YIELD USABLE SIGNALS. QUESTIONS WILL FOLLOW YOUR ROLE NAME ONLY.'
-                        : 'AI IS OFFLINE - ANALYSIS UNAVAILABLE, CUSTOM ROLES CANNOT START.');
+        const errorMessages = {
+            invalid_key: 'THE AI SERVICE COULD NOT AUTHENTICATE. JD ANALYSIS IS UNAVAILABLE.',
+            access_denied: 'THE AI SERVICE DENIED ACCESS. JD ANALYSIS IS UNAVAILABLE.',
+            rate_limited: 'THE AI USAGE LIMIT WAS REACHED. PLEASE TRY ANALYZING AGAIN LATER.',
+            network_error: 'THE AI SERVICE COULD NOT BE REACHED. PLEASE TRY ANALYZING AGAIN LATER.',
+            timeout: 'JD ANALYSIS TIMED OUT. PLEASE TRY ANALYZING AGAIN.',
+            invalid_response: 'THE AI SERVICE RETURNED AN UNUSABLE RESPONSE. PLEASE TRY ANALYZING AGAIN.'
+        };
+        if (hasSignals) {
+            note.textContent = 'ANALYSIS CACHED FROM A PREVIOUS AI RUN.';
+        } else if (analysisFailed) {
+            const message = errorMessages[data.ai_error_code] || (data.fallback_reason === 'ai_error'
+                ? 'THE AI SERVICE COULD NOT ANALYZE THIS JD. PLEASE TRY AGAIN.'
+                : 'AI ANALYSIS IS CURRENTLY UNAVAILABLE. PLEASE TRY AGAIN LATER.');
+            note.textContent = message + ' ROLE TILES STILL WORK; CUSTOM ROLES NEED A SUCCESSFUL ANALYSIS.';
+        } else {
+            note.textContent = 'THE JD DID NOT YIELD USABLE SIGNALS. QUESTIONS WILL FOLLOW YOUR ROLE NAME ONLY.';
+        }
         panel.appendChild(note);
         jdPreviewOk = hasSignals && aiOnline;
     } else {

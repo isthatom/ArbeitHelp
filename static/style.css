@@ -439,7 +439,7 @@
 /* Role grid */
 .role-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
     gap: 12px;
     margin-bottom: 16px;
 }
@@ -568,6 +568,6 @@
 @media (max-width: 600px) {
     .landing-section { padding: 28px 20px; }
     .steps { grid-template-columns: 1fr; }
-    .box { margin: 24px 16px 0; padding: 20px; border-radius: var(--r-md); }
+    .box { width: calc(100% - 32px); margin: 24px 16px 0; padding: 20px; border-radius: var(--r-md); }
     .footer { flex-direction: column; gap: 8px; text-align: center; padding: 20px 16px 0; }
 }
